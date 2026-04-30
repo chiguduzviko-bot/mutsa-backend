@@ -1,4 +1,5 @@
 import re
+import traceback
 import uuid
 
 from flask import request
@@ -141,56 +142,60 @@ class LoginResource(Resource):
     @auth_ns.expect(login_model, validate=True)
     @limiter.limit("5 per minute")
     def post(self):
-        data = request.get_json() or {}
-        if not data.get("email") or not data.get("password"):
-            return _response(False, message="Email and password are required", status=400)
+        try:
+            data = request.get_json() or {}
+            if not data.get("email") or not data.get("password"):
+                return _response(False, message="Email and password are required", status=400)
 
-        user = User.query.filter_by(email=data["email"]).first()
-        if not user or not user.is_active or not user.check_password(data["password"]):
-            # Write failed-login audit without user_id to avoid leaking existence
+            user = User.query.filter_by(email=data["email"]).first()
+            if not user or not user.is_active or not user.check_password(data["password"]):
+                # Write failed-login audit without user_id to avoid leaking existence
+                write_audit(
+                    "LOGIN_FAILED",
+                    entity_type="AUTH",
+                    details={"email": data.get("email")},
+                    metadata={"result": "invalid_credentials"},
+                    request=request,
+                )
+                return {"success": False, "message": "Invalid email or password."}, 401
+
+            role_str = _normalize_role_value(user.role)
+            access_token = create_access_token(
+                identity=str(user.id),
+                additional_claims={"role": role_str, "email": user.email},
+            )
+            refresh_token = create_refresh_token(
+                identity=str(user.id),
+                additional_claims={"role": role_str, "email": user.email},
+            )
+
             write_audit(
-                "LOGIN_FAILED",
+                "LOGIN",
+                actor_user_id=user.id,
+                actor_role=role_str,
                 entity_type="AUTH",
-                details={"email": data.get("email")},
-                metadata={"result": "invalid_credentials"},
+                details={"result": "success"},
+                metadata={"result": "success"},
                 request=request,
             )
-            return {"success": False, "message": "Invalid email or password."}, 401
 
-        role_str = _normalize_role_value(user.role)
-        access_token = create_access_token(
-            identity=str(user.id),
-            additional_claims={"role": role_str, "email": user.email},
-        )
-        refresh_token = create_refresh_token(
-            identity=str(user.id),
-            additional_claims={"role": role_str, "email": user.email},
-        )
-
-        write_audit(
-            "LOGIN",
-            actor_user_id=user.id,
-            actor_role=role_str,
-            entity_type="AUTH",
-            details={"result": "success"},
-            metadata={"result": "success"},
-            request=request,
-        )
-
-        user_payload = _serialize_user(user)
-        return {
-            "success": True,
-            "data": {
-                "access_token": access_token,
-                "refresh_token": refresh_token,
-                "user": {
-                    "id": user_payload["id"],
-                    "email": user_payload["email"],
-                    "full_name": user_payload["full_name"],
-                    "role": user_payload["role"],
+            user_payload = _serialize_user(user)
+            return {
+                "success": True,
+                "data": {
+                    "access_token": access_token,
+                    "refresh_token": refresh_token,
+                    "user": {
+                        "id": user_payload["id"],
+                        "email": user_payload["email"],
+                        "full_name": user_payload["full_name"],
+                        "role": user_payload["role"],
+                    },
                 },
-            },
-        }, 200
+            }, 200
+        except Exception as exc:
+            traceback.print_exc()
+            return {"success": False, "message": str(exc)}, 500
 
 
 @auth_ns.route("/logout")

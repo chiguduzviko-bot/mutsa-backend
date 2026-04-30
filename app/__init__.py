@@ -75,14 +75,9 @@ def create_app(config_name=None):
                 "origins": allowed_origins,
                 "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
                 "allow_headers": ["Content-Type", "Authorization"],
-            },
-            r"/auth/*": {
-                "origins": allowed_origins,
-                "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-                "allow_headers": ["Content-Type", "Authorization"],
-            },
+                "supports_credentials": True,
+            }
         },
-        supports_credentials=True,
     )
 
     @app.before_request
