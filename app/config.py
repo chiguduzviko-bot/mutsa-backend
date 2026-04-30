@@ -32,7 +32,10 @@ class ProductionConfig(Config):
     ENV = "production"
     DEBUG = False
     TESTING = False
-    SQLALCHEMY_DATABASE_URI = _get_database_url()
+    SQLALCHEMY_DATABASE_URI = _get_database_url() or os.environ.get(
+        "SQLALCHEMY_DATABASE_URI",
+        Config.SQLALCHEMY_DATABASE_URI,
+    )
     JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY")
     CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "*").split(",")
 
