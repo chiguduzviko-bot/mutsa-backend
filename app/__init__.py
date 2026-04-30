@@ -52,7 +52,10 @@ def create_app(config_name=None):
 
     # In Railway/production, fail fast if DB URL is missing instead of falling back to localhost defaults.
     if app.config.get("FLASK_ENV") == "production" and not app.config.get("SQLALCHEMY_DATABASE_URI"):
-        raise RuntimeError("DATABASE_URL (or SQLALCHEMY_DATABASE_URI) must be set for production deployment.")
+        raise RuntimeError(
+            "Production DB config missing. Set DATABASE_URL (or SQLALCHEMY_DATABASE_URI), "
+            "or ensure Railway PGHOST/PGPORT/PGUSER/PGPASSWORD/PGDATABASE are available."
+        )
 
     db.init_app(app)
     migrate.init_app(app, db)

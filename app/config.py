@@ -8,6 +8,19 @@ load_dotenv()
 
 def _get_database_url():
     database_url = os.environ.get("DATABASE_URL")
+    if not database_url:
+        # Railway can expose Postgres details as PG* vars when a direct DATABASE_URL
+        # reference is not configured on the backend service.
+        pg_host = os.environ.get("PGHOST")
+        pg_port = os.environ.get("PGPORT")
+        pg_user = os.environ.get("PGUSER")
+        pg_password = os.environ.get("PGPASSWORD")
+        pg_database = os.environ.get("PGDATABASE")
+        if all([pg_host, pg_port, pg_user, pg_password, pg_database]):
+            database_url = (
+                f"postgresql+psycopg2://{pg_user}:{pg_password}@{pg_host}:{pg_port}/{pg_database}"
+            )
+
     if database_url and database_url.startswith("postgres://"):
         return database_url.replace("postgres://", "postgresql://", 1)
     return database_url
