@@ -101,6 +101,7 @@ def create_app(config_name=None):
     from . import models  # noqa: F401
     from .models.db_triggers import register_db_triggers
     from .routes.admin import admin_bp
+    from .routes.audit import audit_bp
     from .routes.auth import auth_ns
     from .routes.cases import cases_ns
     from .routes.custody import custody_ns
@@ -117,5 +118,6 @@ def create_app(config_name=None):
     api.add_namespace(evidence_ns, path="/api/evidence")
     api.add_namespace(custody_ns, path="/api/custody")
     app.register_blueprint(admin_bp, url_prefix="/api")
+    app.register_blueprint(audit_bp, url_prefix="/api")
 
     return app
