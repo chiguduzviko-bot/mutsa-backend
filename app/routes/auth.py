@@ -70,6 +70,10 @@ def _normalize_role_value(role_value):
     return User.normalize_role_value(role_value).value
 
 
+def _is_admin_role(role_value):
+    return str(getattr(role_value, "value", role_value)).strip().upper() == "ADMIN"
+
+
 def _serialize_user(user):
     return {
         "id": str(user.id),
@@ -116,7 +120,7 @@ class RegisterResource(Resource):
         if role != UserRole.AUDITOR:
             verify_jwt_in_request()
             current_user = _get_current_user()
-            if not current_user or current_user.role != UserRole.ADMIN:
+            if not current_user or not _is_admin_role(current_user.role):
                 return _response(False, message="Only admins can assign ADMIN role", status=403)
 
         user = User(

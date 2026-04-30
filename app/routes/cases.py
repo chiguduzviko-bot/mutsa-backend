@@ -15,6 +15,15 @@ from app.models.user import User
 logger = logging.getLogger(__name__)
 
 cases_ns = Namespace("cases", description="Case management operations")
+VALID_FRAUD_TYPES = [
+    "SIM_SWAP",
+    "PHISHING",
+    "IDENTITY_THEFT",
+    "FINANCIAL_FRAUD",
+    "CYBERCRIME",
+    "MONEY_LAUNDERING",
+    "OTHER",
+]
 
 case_create_model = cases_ns.model(
     "CaseCreateInput",
@@ -263,12 +272,11 @@ class CaseListResource(Resource):
         try:
             fraud_type = FraudType(data["fraud_type"])
         except ValueError:
-            valid = [f.value for f in FraudType]
             logger.warning("POST /api/cases 400 – invalid fraud_type=%s", data.get("fraud_type"))
             return _response(
                 False,
                 message=f"Invalid fraud_type value: '{data['fraud_type']}'. "
-                        f"Allowed values: {', '.join(valid)}.",
+                        f"Allowed values: {', '.join(VALID_FRAUD_TYPES)}.",
                 status=400,
             )
 
@@ -391,7 +399,8 @@ class CaseStatusResource(Resource):
         actor = User.query.filter_by(id=actor_id).first() if actor_id else None
         if not actor:
             return _response(False, message="User not found", status=404)
-        if new_status == CaseStatus.CLOSED and actor.role.value != "ADMIN":
+        actor_role = str(getattr(actor.role, "value", actor.role)).strip().upper()
+        if new_status == CaseStatus.CLOSED and actor_role != "ADMIN":
             return _response(False, message="Only Admins can close cases", status=403)
 
         old_status = case.status

@@ -50,6 +50,10 @@ def _err(message, status=400):
     return jsonify({"success": False, "data": {}, "message": message}), status
 
 
+def _is_admin(user):
+    return bool(user) and str(getattr(user.role, "value", user.role)).strip().upper() == "ADMIN"
+
+
 def _apply_log_filters(query):
     user_id = _to_uuid(request.args.get("user_id"))
     evidence_id = _to_uuid(request.args.get("evidence_id"))
@@ -135,6 +139,10 @@ def _serialize_log_row(log, user, evidence, case, file_name):
 @admin_bp.get("/admin/evidence-access-log")
 @requireRole(*_ADMIN_ONLY)
 def list_evidence_access_logs():
+    user = getattr(g, "current_user", None)
+    if not _is_admin(user):
+        return jsonify(success=False, message="Admin access required"), 403
+
     page = max(int(request.args.get("page", 1) or 1), 1)
     per_page = min(max(int(request.args.get("per_page", 50) or 50), 1), 200)
 

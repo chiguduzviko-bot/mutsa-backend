@@ -10,6 +10,13 @@ def _normalize_allowed_roles(roles):
     return {str(role).strip().upper() for role in roles}
 
 
+def _normalize_user_role(user):
+    if not user:
+        return ""
+    role = getattr(user, "role", "")
+    return str(getattr(role, "value", role)).strip().upper()
+
+
 def requireRole(*allowed_roles):
     """Decorator: verifies JWT and checks the authenticated user's role.
 
@@ -32,7 +39,7 @@ def requireRole(*allowed_roles):
             # Fall back to JWT claim if DB lookup misses (e.g. token issued before account deactivation)
             jwt_payload = get_jwt() or {}
             claimed_role = str(jwt_payload.get("role", "")).strip().upper()
-            resolved_role = user.role.value if user else claimed_role
+            resolved_role = _normalize_user_role(user) if user else claimed_role
 
             if not user or resolved_role not in normalized_allowed:
                 return {"success": False, "message": "Forbidden"}, 403
