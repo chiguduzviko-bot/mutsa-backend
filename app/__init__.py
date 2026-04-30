@@ -39,8 +39,13 @@ def create_app(config_name=None):
         os.environ.get("RAILWAY_ENVIRONMENT")
         or os.environ.get("RAILWAY_PROJECT_ID")
         or os.environ.get("RAILWAY_SERVICE_ID")
+        or os.environ.get("RAILWAY_PUBLIC_DOMAIN")
+        or os.environ.get("PORT")
     )
-    if env == "production" or is_railway:
+    if not env:
+        env = "production" if is_railway else "development"
+
+    if str(env).lower() == "production" or is_railway:
         app.config.from_object("app.config.ProductionConfig")
     else:
         app.config.from_object("app.config.DevelopmentConfig")
