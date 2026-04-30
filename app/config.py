@@ -1,4 +1,5 @@
 import os
+from datetime import timedelta
 
 from dotenv import load_dotenv
 
@@ -15,12 +16,18 @@ def _get_database_url():
 class Config:
     SECRET_KEY = os.getenv("SECRET_KEY", "change-me-secret-key")
     JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "change-me-jwt-secret")
+    JWT_ACCESS_TOKEN_EXPIRES = timedelta(hours=1)
+    JWT_REFRESH_TOKEN_EXPIRES = timedelta(days=30)
     SQLALCHEMY_DATABASE_URI = os.getenv(
         "DATABASE_URL",
         "postgresql+psycopg2://postgres:postgres@localhost:5432/chain_custody_db",
     )
     SQLALCHEMY_TRACK_MODIFICATIONS = False
-    CORS_ORIGINS = [origin.strip() for origin in os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",")]
+    CORS_ORIGINS = [
+        os.environ.get("FRONTEND_URL", "https://mutsa-frontend.vercel.app"),
+        "http://localhost:3000",
+        "http://localhost:5173",
+    ]
 
 
 class DevelopmentConfig(Config):
@@ -37,7 +44,11 @@ class ProductionConfig(Config):
         Config.SQLALCHEMY_DATABASE_URI,
     )
     JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY")
-    CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "*").split(",")
+    CORS_ORIGINS = [
+        os.environ.get("FRONTEND_URL", "https://mutsa-frontend.vercel.app"),
+        "http://localhost:3000",
+        "http://localhost:5173",
+    ]
 
 
 config_by_name = {

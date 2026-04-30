@@ -133,7 +133,7 @@ def _serialize_log_row(log, user, evidence, case, file_name):
 # ─── Evidence access log – list ───────────────────────────────────────────────
 
 @admin_bp.get("/admin/evidence-access-log")
-@requireRole(*_AUDITOR_OR_ADMIN)
+@requireRole(*_ADMIN_ONLY)
 def list_evidence_access_logs():
     page = max(int(request.args.get("page", 1) or 1), 1)
     per_page = min(max(int(request.args.get("per_page", 50) or 50), 1), 200)

@@ -5,6 +5,7 @@ from flask import request
 from flask_jwt_extended import (
     create_access_token,
     create_refresh_token,
+    decode_token,
     get_jwt_identity,
     jwt_required,
     verify_jwt_in_request,
@@ -154,7 +155,7 @@ class LoginResource(Resource):
                 metadata={"result": "invalid_credentials"},
                 request=request,
             )
-            return _response(False, message="Invalid credentials", status=401)
+            return {"success": False, "message": "Invalid email or password."}, 401
 
         role_str = _normalize_role_value(user.role)
         access_token = create_access_token(
@@ -176,15 +177,20 @@ class LoginResource(Resource):
             request=request,
         )
 
-        return _response(
-            True,
-            data={
+        user_payload = _serialize_user(user)
+        return {
+            "success": True,
+            "data": {
                 "access_token": access_token,
                 "refresh_token": refresh_token,
-                "user": _serialize_user(user),
+                "user": {
+                    "id": user_payload["id"],
+                    "email": user_payload["email"],
+                    "full_name": user_payload["full_name"],
+                    "role": user_payload["role"],
+                },
             },
-            message="Login successful",
-        )
+        }, 200
 
 
 @auth_ns.route("/logout")
@@ -205,9 +211,21 @@ class LogoutResource(Resource):
 
 @auth_ns.route("/refresh")
 class RefreshResource(Resource):
-    @jwt_required(refresh=True)
     def post(self):
-        user = _get_current_user()
+        body = request.get_json(silent=True) or {}
+        refresh_token = body.get("refresh_token")
+        if not refresh_token:
+            return {"success": False, "message": "refresh_token is required"}, 400
+
+        try:
+            decoded = decode_token(refresh_token)
+        except Exception:
+            return {"success": False, "message": "Invalid refresh token"}, 401
+
+        if decoded.get("type") != "refresh":
+            return {"success": False, "message": "Invalid refresh token"}, 401
+
+        user = User.query.filter_by(id=_to_uuid(decoded.get("sub")), is_active=True).first()
         if not user:
             return _response(False, message="User not found", status=404)
 
@@ -216,7 +234,7 @@ class RefreshResource(Resource):
             identity=str(user.id),
             additional_claims={"role": role_str, "email": user.email},
         )
-        return _response(True, data={"access_token": access_token}, message="Access token refreshed")
+        return {"success": True, "data": {"access_token": access_token}}, 200
 
 
 @auth_ns.route("/me")

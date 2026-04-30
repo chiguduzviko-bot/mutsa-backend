@@ -1,6 +1,7 @@
 import os
+from datetime import timedelta
 
-from flask import Flask
+from flask import Flask, request
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager
 from flask_limiter import Limiter
@@ -39,20 +40,42 @@ def create_app(config_name=None):
     else:
         app.config.from_object("app.config.DevelopmentConfig")
 
+    app.config["JWT_SECRET_KEY"] = os.environ.get("JWT_SECRET_KEY", "fallback-secret")
+    app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(hours=1)
+    app.config["JWT_REFRESH_TOKEN_EXPIRES"] = timedelta(days=30)
+
     db.init_app(app)
     migrate.init_app(app, db)
     jwt.init_app(app)
     limiter.init_app(app)
 
-    allowed_origins = app.config.get("CORS_ORIGINS", ["http://localhost:5173"])
+    allowed_origins = [
+        os.environ.get("FRONTEND_URL", "https://mutsa-frontend.vercel.app"),
+        "http://localhost:3000",
+        "http://localhost:5173",
+    ]
+
     CORS(
         app,
         resources={
-            r"/api/*": {"origins": allowed_origins},
-            r"/auth/*": {"origins": allowed_origins},
+            r"/api/*": {
+                "origins": allowed_origins,
+                "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+                "allow_headers": ["Content-Type", "Authorization"],
+            },
+            r"/auth/*": {
+                "origins": allowed_origins,
+                "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+                "allow_headers": ["Content-Type", "Authorization"],
+            },
         },
         supports_credentials=True,
     )
+
+    @app.before_request
+    def handle_preflight():
+        if request.method == "OPTIONS":
+            return app.make_default_options_response()
 
     from . import models  # noqa: F401
     from .models.db_triggers import register_db_triggers
