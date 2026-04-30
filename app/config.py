@@ -8,6 +8,17 @@ load_dotenv()
 
 def _get_database_url():
     database_url = os.environ.get("DATABASE_URL")
+    is_railway = bool(
+        os.environ.get("RAILWAY_ENVIRONMENT")
+        or os.environ.get("RAILWAY_PROJECT_ID")
+        or os.environ.get("RAILWAY_SERVICE_ID")
+        or os.environ.get("RAILWAY_PUBLIC_DOMAIN")
+        or os.environ.get("PORT")
+    )
+    if is_railway and database_url and ("localhost" in database_url or "127.0.0.1" in database_url):
+        # Ignore local DSNs in Railway and rebuild from PG* vars below.
+        database_url = None
+
     if not database_url:
         # Railway can expose Postgres details as PG* vars when a direct DATABASE_URL
         # reference is not configured on the backend service.
