@@ -50,6 +50,21 @@ def create_app(config_name=None):
     else:
         app.config.from_object("app.config.DevelopmentConfig")
 
+    runtime_db_url = (
+        app.config.get("SQLALCHEMY_DATABASE_URI")
+        or os.environ.get("DATABASE_URL")
+        or os.environ.get("SQLALCHEMY_DATABASE_URI")
+    )
+    if runtime_db_url and runtime_db_url.startswith("postgres://"):
+        runtime_db_url = runtime_db_url.replace("postgres://", "postgresql://", 1)
+
+    # Prevent Railway worker boot crashes when DB vars are temporarily missing.
+    # The API stays up and login endpoints will return controlled DB errors instead.
+    if not runtime_db_url:
+        runtime_db_url = "sqlite:////tmp/chain_custody_fallback.db"
+        app.logger.warning("No DB env vars found; using temporary SQLite fallback.")
+
+    app.config["SQLALCHEMY_DATABASE_URI"] = runtime_db_url
     app.config["FLASK_ENV"] = os.environ.get("FLASK_ENV", "production" if is_railway else "development")
     app.config["JWT_SECRET_KEY"] = os.environ.get("JWT_SECRET_KEY", "mutsa-jwt-fallback-secret-change-me")
     app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(hours=1)
