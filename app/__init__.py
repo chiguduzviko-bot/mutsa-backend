@@ -34,15 +34,25 @@ api = Api(
 
 def create_app(config_name=None):
     app = Flask(__name__)
-    env = config_name or os.environ.get("FLASK_ENV", "development")
-    if env == "production" or os.environ.get("RAILWAY_ENVIRONMENT"):
+    env = config_name or os.environ.get("FLASK_ENV")
+    is_railway = bool(
+        os.environ.get("RAILWAY_ENVIRONMENT")
+        or os.environ.get("RAILWAY_PROJECT_ID")
+        or os.environ.get("RAILWAY_SERVICE_ID")
+    )
+    if env == "production" or is_railway:
         app.config.from_object("app.config.ProductionConfig")
     else:
         app.config.from_object("app.config.DevelopmentConfig")
 
-    app.config["JWT_SECRET_KEY"] = os.environ.get("JWT_SECRET_KEY", "fallback-secret")
+    app.config["FLASK_ENV"] = os.environ.get("FLASK_ENV", "production" if is_railway else "development")
+    app.config["JWT_SECRET_KEY"] = os.environ.get("JWT_SECRET_KEY", "mutsa-jwt-fallback-secret-change-me")
     app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(hours=1)
     app.config["JWT_REFRESH_TOKEN_EXPIRES"] = timedelta(days=30)
+
+    # In Railway/production, fail fast if DB URL is missing instead of falling back to localhost defaults.
+    if app.config.get("FLASK_ENV") == "production" and not app.config.get("SQLALCHEMY_DATABASE_URI"):
+        raise RuntimeError("DATABASE_URL (or SQLALCHEMY_DATABASE_URI) must be set for production deployment.")
 
     db.init_app(app)
     migrate.init_app(app, db)
