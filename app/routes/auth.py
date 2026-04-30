@@ -2,7 +2,7 @@ import re
 import traceback
 import uuid
 
-from flask import request
+from flask import current_app, request
 from flask_jwt_extended import (
     create_access_token,
     create_refresh_token,
@@ -12,6 +12,7 @@ from flask_jwt_extended import (
     verify_jwt_in_request,
 )
 from flask_restx import Namespace, Resource, fields
+from sqlalchemy.exc import SQLAlchemyError
 
 from app import db
 from app import limiter
@@ -143,7 +144,7 @@ class LoginResource(Resource):
     @limiter.limit("5 per minute")
     def post(self):
         try:
-            data = request.get_json() or {}
+            data = request.get_json(silent=True) or {}
             if not data.get("email") or not data.get("password"):
                 return _response(False, message="Email and password are required", status=400)
 
@@ -193,7 +194,12 @@ class LoginResource(Resource):
                     },
                 },
             }, 200
+        except SQLAlchemyError:
+            db.session.rollback()
+            current_app.logger.exception("Database error during login")
+            return {"success": False, "message": "Database temporarily unavailable."}, 503
         except Exception as exc:
+            db.session.rollback()
             traceback.print_exc()
             return {"success": False, "message": str(exc)}, 500
 
