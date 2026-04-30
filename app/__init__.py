@@ -47,7 +47,10 @@ def create_app(config_name=None):
     allowed_origins = app.config.get("CORS_ORIGINS", ["http://localhost:5173"])
     CORS(
         app,
-        resources={r"/api/*": {"origins": allowed_origins}},
+        resources={
+            r"/api/*": {"origins": allowed_origins},
+            r"/auth/*": {"origins": allowed_origins},
+        },
         supports_credentials=True,
     )
 
@@ -64,6 +67,7 @@ def create_app(config_name=None):
 
     api.init_app(app)
     api.add_namespace(auth_ns, path="/api/auth")
+    api.add_namespace(auth_ns, path="/auth")
     api.add_namespace(health_ns, path="/api/health")
     api.add_namespace(cases_ns, path="/api/cases")
     api.add_namespace(evidence_ns, path="/api/evidence")
