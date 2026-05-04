@@ -1,3 +1,4 @@
+import enum
 import logging
 import uuid
 from datetime import datetime
@@ -178,6 +179,15 @@ def _normalize_case_create_payload(data):
     return payload
 
 
+def _enum_to_api(value, *, fallback="UNKNOWN"):
+    """String value for SQLAlchemy enum columns; avoids 500s on NULL or unexpected DB values."""
+    if value is None:
+        return fallback
+    if isinstance(value, enum.Enum):
+        return value.value
+    return str(value)
+
+
 def _serialize_case(case):
     return {
         "id": str(case.id),
@@ -185,11 +195,11 @@ def _serialize_case(case):
         "title": case.title,
         "description": case.description,
         "suspect_info": case.suspect_info,
-        "fraud_type": case.fraud_type.value,
-        "status": case.status.value,
+        "fraud_type": _enum_to_api(case.fraud_type, fallback="OTHER"),
+        "status": _enum_to_api(case.status, fallback="OPEN"),
         "incident_date": case.incident_date.isoformat() if case.incident_date else None,
         "assigned_to": str(case.assigned_user_id) if case.assigned_user_id else None,
-        "opened_by_user_id": str(case.opened_by_user_id),
+        "opened_by_user_id": str(case.opened_by_user_id) if case.opened_by_user_id else None,
         "created_at": case.created_at.isoformat() if case.created_at else None,
         "updated_at": case.updated_at.isoformat() if case.updated_at else None,
     }
@@ -214,36 +224,44 @@ class CaseListResource(Resource):
     @requireRole("ADMIN", "INVESTIGATOR", "AUTHORIZER")
     @jwt_required()
     def get(self):
-        page = request.args.get("page", default=1, type=int)
-        per_page = request.args.get("per_page", default=10, type=int)
-        status = request.args.get("status")
-        fraud_type = request.args.get("fraud_type")
+        try:
+            page = request.args.get("page", default=1, type=int)
+            per_page = request.args.get("per_page", default=10, type=int)
+            status = request.args.get("status")
+            fraud_type = request.args.get("fraud_type")
 
-        if page < 1 or per_page < 1 or per_page > 100:
-            return _response(False, message="Invalid pagination parameters", status=400)
+            if page < 1 or per_page < 1 or per_page > 100:
+                return _response(False, message="Invalid pagination parameters", status=400)
 
-        query = Case.query
-        if status:
-            try:
-                query = query.filter(Case.status == _parse_case_status(status))
-            except ValueError:
-                return _response(False, message="Invalid status filter", status=400)
-        if fraud_type:
-            try:
-                query = query.filter(Case.fraud_type == _parse_fraud_type(fraud_type))
-            except ValueError:
-                return _response(False, message="Invalid fraud_type filter", status=400)
+            query = Case.query.filter(
+                Case.status.isnot(None),
+                Case.fraud_type.isnot(None),
+            )
+            if status:
+                try:
+                    query = query.filter(Case.status == _parse_case_status(status))
+                except ValueError:
+                    return _response(False, message="Invalid status filter", status=400)
+            if fraud_type:
+                try:
+                    query = query.filter(Case.fraud_type == _parse_fraud_type(fraud_type))
+                except ValueError:
+                    return _response(False, message="Invalid fraud_type filter", status=400)
 
-        pagination = query.order_by(Case.created_at.desc()).paginate(page=page, per_page=per_page, error_out=False)
-        items = [_serialize_case(c) for c in pagination.items]
-        data = {
-            "items": items,
-            "cases": items,
-            "total": pagination.total,
-            "page": page,
-            "per_page": per_page,
-        }
-        return _response(True, data=data, message="Cases fetched")
+            pagination = query.order_by(Case.created_at.desc()).paginate(page=page, per_page=per_page, error_out=False)
+            items = [_serialize_case(c) for c in pagination.items]
+
+            data = {
+                "items": items,
+                "cases": items,
+                "total": pagination.total,
+                "page": page,
+                "per_page": per_page,
+            }
+            return _response(True, data=data, message="Cases fetched")
+        except Exception:
+            logger.exception("GET /api/cases failed")
+            return _response(False, message="Failed to list cases", status=500)
 
     @cases_ns.expect(case_create_model, validate=False)
     @requireRole("ADMIN", "INVESTIGATOR")
