@@ -66,7 +66,7 @@ def _to_uuid(value):
 
 
 def _normalize_role_value(role_value):
-    """Always returns uppercase string: ADMIN or AUDITOR."""
+    """Always returns uppercase role string from UserRole."""
     return User.normalize_role_value(role_value).value
 
 
@@ -115,13 +115,17 @@ class RegisterResource(Resource):
         try:
             role = User.normalize_role_value(raw_role)
         except ValueError:
-            return _response(False, message="Invalid role value. Allowed: ADMIN, AUDITOR", status=400)
+            return _response(
+                False,
+                message="Invalid role value. Allowed: ADMIN, AUDITOR, INVESTIGATOR, AUTHORIZER",
+                status=400,
+            )
 
         if role != UserRole.AUDITOR:
             verify_jwt_in_request()
             current_user = _get_current_user()
             if not current_user or not _is_admin_role(current_user.role):
-                return _response(False, message="Only admins can assign ADMIN role", status=403)
+                return _response(False, message="Only admins can assign elevated roles", status=403)
 
         user = User(
             employee_number=data["employee_number"],

@@ -107,6 +107,7 @@ def create_app(config_name=None):
     from .routes.custody import custody_ns
     from .routes.evidence import evidence_ns
     from .routes.health import health_ns
+    from .routes.users import users_ns
 
     register_db_triggers()
 
@@ -115,6 +116,7 @@ def create_app(config_name=None):
     api.add_namespace(auth_ns, path="/auth")
     api.add_namespace(health_ns, path="/api/health")
     api.add_namespace(cases_ns, path="/api/cases")
+    api.add_namespace(users_ns, path="/api/users")
     api.add_namespace(evidence_ns, path="/api/evidence")
     api.add_namespace(custody_ns, path="/api/custody")
     app.register_blueprint(admin_bp, url_prefix="/api")

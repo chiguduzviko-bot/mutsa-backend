@@ -15,6 +15,7 @@ from app.models.evidence import Evidence, EvidenceType
 from app.models.file_hash import FileHash
 from app.models.user import User
 from app.utils.access_logger import log_access
+from app.utils.decorators import requireRole
 from app.utils.hashing import sha256_hash_file
 
 evidence_ns = Namespace("evidence", description="Evidence management operations")
@@ -171,6 +172,7 @@ def _parse_or_infer_evidence_type(raw_value, file_name, mime_type):
 @evidence_ns.route("/cases/<string:case_id>/evidence")
 class CaseEvidenceCollectionResource(Resource):
     @evidence_ns.expect(evidence_create_model, validate=False)
+    @requireRole("ADMIN", "INVESTIGATOR")
     @jwt_required()
     def post(self, case_id):
         case, err = _ensure_case(case_id)
@@ -282,6 +284,7 @@ class CaseEvidenceCollectionResource(Resource):
             status=201,
         )
 
+    @requireRole("ADMIN", "INVESTIGATOR")
     @jwt_required()
     def get(self, case_id):
         case, err = _ensure_case(case_id)
@@ -298,6 +301,7 @@ class CaseEvidenceCollectionResource(Resource):
 
 @evidence_ns.route("/cases/<string:case_id>/evidences")
 class CaseEvidencesAliasResource(Resource):
+    @requireRole("ADMIN", "INVESTIGATOR")
     @jwt_required()
     def get(self, case_id):
         case, err = _ensure_case(case_id)

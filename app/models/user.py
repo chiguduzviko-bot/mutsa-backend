@@ -10,14 +10,15 @@ from sqlalchemy.orm import validates
 from app import db
 
 _LEGACY_ROLE_MAP = {
-    "INVESTIGATOR": "AUDITOR",
-    "SUPERVISOR": "AUDITOR",
+    "SUPERVISOR": "AUTHORIZER",
 }
 
 
 class UserRole(enum.Enum):
     ADMIN = "ADMIN"
     AUDITOR = "AUDITOR"
+    INVESTIGATOR = "INVESTIGATOR"
+    AUTHORIZER = "AUTHORIZER"
 
 
 class User(db.Model):
@@ -25,7 +26,7 @@ class User(db.Model):
 
     id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     employee_number = db.Column(db.String(32), unique=True, nullable=False)
-    full_name = db.Column(db.String(150), nullable=False)
+    full_name = db.Column(db.String(255), nullable=False)
     email = db.Column(db.String(255), unique=True, nullable=False)
     phone = db.Column(db.String(24))
     role = db.Column(db.Enum(UserRole, name="user_role_enum"), nullable=False, default=UserRole.AUDITOR)

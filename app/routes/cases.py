@@ -11,6 +11,7 @@ from app.models.audit_trail import AuditTrail
 from app.models.case import Case, CaseStatus, FraudType
 from app.models.evidence import Evidence
 from app.models.user import User
+from app.utils.decorators import requireRole
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +51,7 @@ case_update_model = cases_ns.model(
 case_status_update_model = cases_ns.model(
     "CaseStatusUpdateInput",
     {
-        "status": fields.String(required=True, enum=[s.value for s in CaseStatus]),
+        "status": fields.String(required=True, enum=["OPEN", "REJECTED"]),
         "reason": fields.String(required=True),
     },
 )
@@ -210,6 +211,7 @@ def _serialize_evidence(item):
 
 @cases_ns.route("")
 class CaseListResource(Resource):
+    @requireRole("ADMIN", "INVESTIGATOR", "AUTHORIZER")
     @jwt_required()
     def get(self):
         page = request.args.get("page", default=1, type=int)
@@ -244,6 +246,7 @@ class CaseListResource(Resource):
         return _response(True, data=data, message="Cases fetched")
 
     @cases_ns.expect(case_create_model, validate=False)
+    @requireRole("ADMIN", "INVESTIGATOR")
     @jwt_required()
     def post(self):
         json_payload = request.get_json(silent=True) or {}
@@ -269,6 +272,11 @@ class CaseListResource(Resource):
         if not actor_id:
             return _response(False, message="Invalid token identity", status=401)
 
+        actor = User.query.filter_by(id=actor_id, is_active=True).first()
+        if not actor:
+            return _response(False, message="User not found", status=404)
+        actor_role = str(getattr(actor.role, "value", actor.role)).strip().upper()
+
         try:
             fraud_type = FraudType(data["fraud_type"])
         except ValueError:
@@ -291,7 +299,7 @@ class CaseListResource(Resource):
             description=data.get("description"),
             suspect_info=data.get("suspect_info"),
             fraud_type=fraud_type,
-            status=CaseStatus.OPEN,
+            status=CaseStatus.PENDING_APPROVAL if actor_role == "INVESTIGATOR" else CaseStatus.OPEN,
             incident_date=datetime.utcnow().date(),
             opened_by_user_id=actor_id,
             assigned_user_id=assigned_to_uuid,
@@ -378,6 +386,7 @@ class CaseDetailResource(Resource):
 @cases_ns.route("/<string:case_id>/status")
 class CaseStatusResource(Resource):
     @cases_ns.expect(case_status_update_model, validate=True)
+    @requireRole("ADMIN", "AUTHORIZER")
     @jwt_required()
     def put(self, case_id):
         case_uuid = _to_uuid(case_id)
@@ -394,19 +403,21 @@ class CaseStatusResource(Resource):
             new_status = CaseStatus(data["status"])
         except ValueError:
             return _response(False, message="Invalid status value", status=400)
+        if new_status not in (CaseStatus.OPEN, CaseStatus.REJECTED):
+            return _response(False, message="Status must be OPEN or REJECTED", status=400)
 
         actor_id = _to_uuid(get_jwt_identity())
         actor = User.query.filter_by(id=actor_id).first() if actor_id else None
         if not actor:
             return _response(False, message="User not found", status=404)
         actor_role = str(getattr(actor.role, "value", actor.role)).strip().upper()
-        if new_status == CaseStatus.CLOSED and actor_role != "ADMIN":
-            return _response(False, message="Only Admins can close cases", status=403)
+        if case.status != CaseStatus.PENDING_APPROVAL:
+            return _response(False, message="Only pending approval cases can be approved or rejected", status=400)
+        if actor_role not in {"ADMIN", "AUTHORIZER"}:
+            return _response(False, message="Only Admins or Authorizers can approve or reject cases", status=403)
 
         old_status = case.status
         case.status = new_status
-        if new_status == CaseStatus.CLOSED:
-            case.closed_at = datetime.utcnow()
 
         db.session.add(
             AuditTrail(
@@ -418,7 +429,18 @@ class CaseStatusResource(Resource):
             )
         )
         db.session.commit()
-        return _response(True, data={"id": str(case.id), "status": case.status.value}, message="Case status updated")
+        return _response(
+            True,
+            data={
+                "status_update": {
+                    "id": str(case.id),
+                    "from": old_status.value,
+                    "to": case.status.value,
+                    "reason": data["reason"],
+                }
+            },
+            message="Case status updated",
+        )
 
 
 @cases_ns.route("/<string:case_id>/timeline")

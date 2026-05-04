@@ -1,5 +1,6 @@
 import csv
 import io
+import re
 import uuid
 from datetime import datetime, time
 
@@ -12,13 +13,16 @@ from app.models.case import Case
 from app.models.evidence import Evidence
 from app.models.evidence_access_log import EvidenceAccessLog
 from app.models.file_hash import FileHash
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.utils.decorators import requireRole
 
 admin_bp = Blueprint("admin", __name__)
 
 _AUDITOR_OR_ADMIN = ("ADMIN", "AUDITOR")
 _ADMIN_ONLY = ("ADMIN",)
+
+_ADMIN_USER_CREATE_ROLES = frozenset(r.value for r in UserRole)
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 # ─── helpers ──────────────────────────────────────────────────────────────────
@@ -48,6 +52,20 @@ def _ok(data=None, message="", status=200):
 
 def _err(message, status=400):
     return jsonify({"success": False, "data": {}, "message": message}), status
+
+
+def _generate_employee_number():
+    for _ in range(20):
+        candidate = f"EMP-{uuid.uuid4().hex[:8].upper()}"
+        if not User.query.filter_by(employee_number=candidate).first():
+            return candidate
+    raise RuntimeError("Failed to generate unique employee number")
+
+
+def _user_created_at_iso(user):
+    if not user.created_at:
+        return None
+    return user.created_at.isoformat() + "Z"
 
 
 def _is_admin(user):
@@ -132,6 +150,68 @@ def _serialize_log_row(log, user, evidence, case, file_name):
         "ip_address": str(log.ip_address) if log.ip_address else None,
         "notes": log.notes,
     }
+
+
+# ─── Admin: create user ─────────────────────────────────────────────────────────
+
+@admin_bp.post("/admin/users")
+@requireRole(*_ADMIN_ONLY)
+def admin_create_user():
+    body = request.get_json(silent=True) or {}
+    full_name = (body.get("full_name") or "").strip()
+    email = (body.get("email") or "").strip().lower()
+    password = body.get("password") or ""
+    role_raw = (body.get("role") or "").strip().upper()
+
+    if not full_name or not email or not password or not role_raw:
+        return _err("full_name, email, password, and role are required", 400)
+    if len(full_name) > 255:
+        return _err("full_name must be at most 255 characters", 400)
+    if role_raw not in _ADMIN_USER_CREATE_ROLES:
+        return _err(f"role must be one of: {', '.join(sorted(_ADMIN_USER_CREATE_ROLES))}", 400)
+    if not _EMAIL_RE.match(email):
+        return _err("Invalid email format", 400)
+    if len(password) < 8:
+        return _err("Password must be at least 8 characters", 400)
+
+    if User.query.filter_by(email=email).first():
+        return jsonify({"success": False, "message": "Email already registered"}), 409
+
+    try:
+        role = User.normalize_role_value(role_raw)
+    except ValueError:
+        return _err(f"role must be one of: {', '.join(sorted(_ADMIN_USER_CREATE_ROLES))}", 400)
+
+    user = User(
+        employee_number=_generate_employee_number(),
+        full_name=full_name,
+        email=email,
+        role=role,
+        is_active=True,
+    )
+    user.set_password(password)
+    db.session.add(user)
+    db.session.commit()
+
+    return (
+        jsonify(
+            {
+                "success": True,
+                "data": {
+                    "user": {
+                        "id": str(user.id),
+                        "full_name": user.full_name,
+                        "email": user.email,
+                        "role": user.role.value,
+                        "is_active": user.is_active,
+                        "created_at": _user_created_at_iso(user),
+                    }
+                },
+                "message": "User created successfully",
+            }
+        ),
+        201,
+    )
 
 
 # ─── Evidence access log – list ───────────────────────────────────────────────

@@ -69,15 +69,15 @@ def client(app):
 # ─── Role-normalization unit test ─────────────────────────────────────────────
 
 class TestUserRoleNormalization:
-    def test_investigator_mapped_to_auditor(self):
+    def test_investigator_role_preserved(self):
         from app.models.user import User
         result = User.normalize_role_value("INVESTIGATOR")
-        assert result == UserRole.AUDITOR
+        assert result == UserRole.INVESTIGATOR
 
-    def test_supervisor_mapped_to_auditor(self):
+    def test_supervisor_mapped_to_authorizer(self):
         from app.models.user import User
         result = User.normalize_role_value("SUPERVISOR")
-        assert result == UserRole.AUDITOR
+        assert result == UserRole.AUTHORIZER
 
     def test_admin_preserved(self):
         from app.models.user import User
@@ -88,6 +88,11 @@ class TestUserRoleNormalization:
         from app.models.user import User
         result = User.normalize_role_value("AUDITOR")
         assert result == UserRole.AUDITOR
+
+    def test_authorizer_preserved(self):
+        from app.models.user import User
+        result = User.normalize_role_value("AUTHORIZER")
+        assert result == UserRole.AUTHORIZER
 
     def test_lowercase_normalized(self):
         from app.models.user import User
