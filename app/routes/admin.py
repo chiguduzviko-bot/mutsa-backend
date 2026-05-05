@@ -9,12 +9,14 @@ from sqlalchemy import cast, func
 
 from app import db
 from app.models.audit_log_flag import AuditLogFlag, FLAG_CATEGORIES, FLAG_STATUSES
+from app.models.audit_trail import AuditTrail
 from app.models.case import Case
 from app.models.evidence import Evidence
 from app.models.evidence_access_log import EvidenceAccessLog
 from app.models.file_hash import FileHash
 from app.models.user import User, UserRole
 from app.utils.decorators import requireRole
+from app.utils.audit_logger import log_audit
 
 admin_bp = Blueprint("admin", __name__)
 
@@ -200,6 +202,9 @@ def admin_create_user():
     db.session.add(user)
     db.session.commit()
 
+    actor = getattr(g, "current_user", None)
+    log_audit(actor, "USER_CREATED", details=f"Created user {email} with role {role.value}")
+
     return (
         jsonify(
             {
@@ -262,6 +267,7 @@ def admin_delete_user(user_id):
         )
     )
     db.session.commit()
+    log_audit(actor, "USER_DELETED", details=f"Deleted user {user.email}")
     return _ok(message="User deleted")
 
 
@@ -300,6 +306,7 @@ def admin_update_user_role(user_id):
         )
     )
     db.session.commit()
+    log_audit(actor, "ROLE_CHANGED", details=f"Changed {user.email} role from {previous_role} to {user.role.value}")
 
     return _ok(
         {"user": {"id": str(user.id), "full_name": user.full_name, "email": user.email, "role": user.role.value}},

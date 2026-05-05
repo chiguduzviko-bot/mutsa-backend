@@ -18,6 +18,7 @@ from app import db
 from app import limiter
 from app.models.user import User, UserRole
 from app.utils.audit import write_audit
+from app.utils.audit_logger import log_audit
 
 auth_ns = Namespace("auth", description="Authentication operations")
 
@@ -187,6 +188,7 @@ class LoginResource(Resource):
                 metadata={"result": "success"},
                 request=request,
             )
+            log_audit(user, "LOGIN")
 
             user_payload = _serialize_user(user)
             return {
@@ -225,6 +227,7 @@ class LogoutResource(Resource):
             details={"triggered_by": "user"},
             request=request,
         )
+        log_audit(user, "LOGOUT")
         return _response(True, message="Logged out successfully")
 
 

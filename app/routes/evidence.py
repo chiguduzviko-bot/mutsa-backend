@@ -17,6 +17,7 @@ from app.models.user import User
 from app.utils.access_logger import log_access
 from app.utils.decorators import requireRole
 from app.utils.hashing import sha256_hash_file
+from app.utils.audit_logger import log_audit
 
 evidence_ns = Namespace("evidence", description="Evidence management operations")
 
@@ -270,6 +271,16 @@ class CaseEvidenceCollectionResource(Resource):
         )
         db.session.commit()
 
+        current_user = User.query.filter_by(id=actor_id, is_active=True).first()
+        log_audit(
+            current_user,
+            "EVIDENCE_ADDED",
+            case_obj=case,
+            evidence_obj=evidence,
+            details=f"Added evidence: {safe_name}",
+            hash_at_time=digest,
+        )
+
         return _response(
             True,
             data={
@@ -417,6 +428,15 @@ class EvidenceVerifyHashResource(Resource):
         db.session.commit()
         if actor_id:
             log_access(evidence.id, actor_id, "HASH_VERIFIED", request=request)
+
+        current_user = User.query.filter_by(id=actor_id, is_active=True).first()
+        log_audit(
+            current_user,
+            "HASH_VERIFIED",
+            evidence_obj=evidence,
+            hash_at_time=computed_hash,
+            hash_status="OK" if match else "TAMPERED",
+        )
 
         return _response(
             True,

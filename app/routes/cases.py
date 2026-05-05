@@ -13,6 +13,7 @@ from app.models.case import Case, CaseStatus, FraudType
 from app.models.evidence import Evidence
 from app.models.user import User
 from app.utils.decorators import requireRole
+from app.utils.audit_logger import log_audit
 
 logger = logging.getLogger(__name__)
 
@@ -341,6 +342,7 @@ class CaseListResource(Resource):
             )
         )
         db.session.commit()
+        log_audit(actor, "CASE_CREATED", case_obj=case, details=f"Created case: {case.title}")
         return _response(True, data={"id": str(case.id), "case_number": case.case_number}, message="Case created", status=201)
 
 
@@ -407,6 +409,13 @@ class CaseDetailResource(Resource):
                 )
             )
             db.session.commit()
+
+            # Log audit based on new status
+            if new_status == CaseStatus.OPEN:
+                log_audit(actor, "CASE_APPROVED", case_obj=case, details="Case approved — status changed to OPEN")
+            elif new_status == CaseStatus.REJECTED:
+                log_audit(actor, "CASE_REJECTED", case_obj=case, details=f"Case rejected — reason: {data['reason']}")
+
             return _response(
                 True,
                 data={

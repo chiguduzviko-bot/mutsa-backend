@@ -6,10 +6,7 @@ from flask import Blueprint, Response, jsonify, request
 from sqlalchemy import func
 
 from app import db
-from app.models.case import Case
-from app.models.evidence import Evidence
-from app.models.evidence_access_log import EvidenceAccessLog
-from app.models.user import User
+from app.models.audit_log import AuditLog
 from app.utils.decorators import requireRole
 
 audit_bp = Blueprint("audit", __name__)
@@ -33,14 +30,6 @@ def _parse_date(value):
         except ValueError:
             return None
 
-def _base_query():
-    return (
-        db.session.query(EvidenceAccessLog, User, Evidence, Case)
-        .join(User, User.id == EvidenceAccessLog.user_id)
-        .join(Evidence, Evidence.id == EvidenceAccessLog.evidence_id)
-        .join(Case, Case.id == EvidenceAccessLog.case_id)
-    )
-
 
 def _apply_filters(query):
     action = (request.args.get("action") or "").strip().upper()
@@ -49,32 +38,29 @@ def _apply_filters(query):
     date_to = _parse_date(request.args.get("date_to"))
 
     if action:
-        query = query.filter(EvidenceAccessLog.action == action)
+        query = query.filter(AuditLog.action == action)
     if user_id:
-        query = query.filter(EvidenceAccessLog.user_id == user_id)
+        query = query.filter(AuditLog.user_id == user_id)
     if date_from:
-        query = query.filter(EvidenceAccessLog.occurred_at >= date_from)
+        query = query.filter(AuditLog.timestamp >= date_from)
     if date_to:
-        query = query.filter(EvidenceAccessLog.occurred_at <= date_to)
+        query = query.filter(AuditLog.timestamp <= date_to)
     return query
 
 
-def _hash_status(hash_at_time):
-    return "OK" if hash_at_time else "UNKNOWN"
-
-
-def _serialize_log(log, user, evidence, case):
+def _serialize_log(log):
     return {
         "id": str(log.id),
-        "user_id": str(user.id),
-        "user_name": user.full_name,
-        "user_role": str(getattr(user.role, "value", user.role)).upper(),
+        "user_id": str(log.user_id) if log.user_id else None,
+        "user_name": log.user_name or "UNKNOWN",
+        "user_role": (log.user_role or "UNKNOWN").upper(),
         "action": log.action,
-        "evidence_ref": evidence.evidence_tag,
-        "case_number": case.case_number,
+        "case_number": log.case_number,
+        "evidence_ref": log.evidence_ref,
+        "details": log.details,
         "hash_at_time": log.hash_at_time,
-        "hash_status": _hash_status(log.hash_at_time),
-        "timestamp": log.occurred_at.isoformat() + "Z" if log.occurred_at else None,
+        "hash_status": log.hash_status or ("OK" if log.hash_at_time else None),
+        "timestamp": log.timestamp.isoformat() + "Z" if log.timestamp else None,
     }
 
 
@@ -84,10 +70,11 @@ def get_audit_logs():
     page = max(int(request.args.get("page", 1) or 1), 1)
     per_page = min(max(int(request.args.get("per_page", 50) or 50), 1), 200)
 
-    query = _apply_filters(_base_query())
+    query = AuditLog.query
+    query = _apply_filters(query)
     total = query.count()
     rows = (
-        query.order_by(EvidenceAccessLog.occurred_at.desc())
+        query.order_by(AuditLog.timestamp.desc())
         .offset((page - 1) * per_page)
         .limit(per_page)
         .all()
@@ -96,7 +83,7 @@ def get_audit_logs():
     return jsonify(
         success=True,
         data={
-            "logs": [_serialize_log(*row) for row in rows],
+            "logs": [_serialize_log(row) for row in rows],
             "total": total,
             "page": page,
             "per_page": per_page,
@@ -111,18 +98,18 @@ def get_audit_stats():
     today = datetime.utcnow().date()
     start_today = datetime.combine(today, time.min)
     end_today = datetime.combine(today, time.max)
-    base = EvidenceAccessLog.query.filter(
-        EvidenceAccessLog.occurred_at >= start_today,
-        EvidenceAccessLog.occurred_at <= end_today,
+    base = AuditLog.query.filter(
+        AuditLog.timestamp >= start_today,
+        AuditLog.timestamp <= end_today,
     )
 
     return jsonify(
         success=True,
         data={
             "total_actions_today": base.count(),
-            "active_users_today": base.with_entities(func.count(func.distinct(EvidenceAccessLog.user_id))).scalar() or 0,
-            "evidence_items_touched": base.with_entities(func.count(func.distinct(EvidenceAccessLog.evidence_id))).scalar() or 0,
-            "hash_verifications": base.filter(EvidenceAccessLog.action == "HASH_VERIFIED").count(),
+            "active_users_today": base.with_entities(func.count(func.distinct(AuditLog.user_id))).scalar() or 0,
+            "evidence_items_touched": base.with_entities(func.count(func.distinct(AuditLog.evidence_id))).scalar() or 0,
+            "hash_verifications": base.filter(AuditLog.action == "HASH_VERIFIED").count(),
         },
         message="Audit stats fetched",
     )
@@ -132,7 +119,7 @@ def get_audit_stats():
 @audit_bp.get("/audit/export")
 @requireRole("AUDITOR")
 def export_audit_logs():
-    rows = _apply_filters(_base_query()).order_by(EvidenceAccessLog.occurred_at.desc()).all()
+    rows = _apply_filters(AuditLog.query).order_by(AuditLog.timestamp.desc()).all()
 
     output = io.StringIO()
     writer = csv.writer(output)
@@ -143,26 +130,28 @@ def export_audit_logs():
             "user_name",
             "user_role",
             "action",
-            "evidence_ref",
             "case_number",
+            "evidence_ref",
+            "details",
             "hash_at_time",
             "hash_status",
             "timestamp",
         ]
     )
-    for log, user, evidence, case in rows:
-        item = _serialize_log(log, user, evidence, case)
+    for log in rows:
+        item = _serialize_log(log)
         writer.writerow(
             [
                 item["id"],
-                item["user_id"],
+                item["user_id"] or "",
                 item["user_name"],
                 item["user_role"],
                 item["action"],
-                item["evidence_ref"],
-                item["case_number"],
+                item["case_number"] or "",
+                item["evidence_ref"] or "",
+                item["details"] or "",
                 item["hash_at_time"] or "",
-                item["hash_status"],
+                item["hash_status"] or "",
                 item["timestamp"] or "",
             ]
         )

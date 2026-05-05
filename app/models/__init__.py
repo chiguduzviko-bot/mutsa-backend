@@ -1,3 +1,4 @@
+from .audit_log import AuditLog
 from .audit_log_flag import AuditLogFlag
 from .audit_trail import AuditTrail
 from .case import Case, CaseStatus, FraudType
@@ -20,6 +21,7 @@ __all__ = [
     "CustodyLog",
     "CustodyAction",
     "FileHash",
+    "AuditLog",
     "AuditTrail",
     "AuditLogFlag",
 ]

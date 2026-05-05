@@ -13,6 +13,7 @@ from app.models.evidence import Evidence, EvidenceState
 from app.models.user import User
 from app.utils.access_logger import log_access
 from app.utils.decorators import requireRole
+from app.utils.audit_logger import log_audit
 
 custody_ns = Namespace("custody", description="Custody transfer operations")
 logger = logging.getLogger(__name__)
@@ -193,6 +194,17 @@ class EvidenceTransferResource(Resource):
         )
         db.session.commit()
         log_access(evidence.id, actor.id, "TRANSFERRED", notes=reason, request=request)
+
+        from_user = User.query.filter_by(id=previous_custodian).first()
+        to_user = User.query.filter_by(id=to_user_id).first()
+        from_name = from_user.full_name if from_user else "Unknown"
+        to_name = to_user.full_name if to_user else "Unknown"
+        log_audit(
+            actor,
+            "TRANSFERRED",
+            evidence_obj=evidence,
+            details=f"Transferred from {from_name} to {to_name}. Reason: {reason}",
+        )
 
         logger.info(
             "Custody transfer notification: evidence=%s from=%s to=%s location=%s",
