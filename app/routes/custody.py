@@ -14,6 +14,7 @@ from app.models.user import User
 from app.utils.access_logger import log_access
 from app.utils.decorators import requireRole
 from app.utils.audit_logger import log_audit
+from app.utils.serializers import serialize_custody_record, to_iso_timestamp
 
 custody_ns = Namespace("custody", description="Custody transfer operations")
 logger = logging.getLogger(__name__)
@@ -79,22 +80,20 @@ def _serialize_custody_entry(entry, previous_status):
     if entry.notes and "Reason: " in entry.notes:
         reason = entry.notes.split("Reason: ", 1)[1].split(" | Notes:", 1)[0]
 
-    payload = {
+    # Use standard custody record serializer
+    custody_record = serialize_custody_record(entry, include_ids=True)
+    
+    # Add custody-flow specific fields
+    custody_record.update({
         "id": entry.id,
-        "who": str(entry.recorded_by_user_id),
-        "when": entry.transferred_at.isoformat() if entry.transferred_at else None,
         "from_status": previous_status,
         "to_status": to_status,
         "reason": reason,
-        "location": entry.location,
-        "action": entry.action.value,
-        "from_user_id": str(entry.from_user_id) if entry.from_user_id else None,
-        "to_user_id": str(entry.to_user_id) if entry.to_user_id else None,
-        "recorded_by_user_id": str(entry.recorded_by_user_id),
-        "transferred_at": entry.transferred_at.isoformat() if entry.transferred_at else None,
-        "notes": entry.notes,
-    }
-    return payload, to_status
+        "who": str(entry.recorded_by_user_id),
+        "when": to_iso_timestamp(entry.transferred_at),
+    })
+    
+    return custody_record, to_status
 
 
 def _identity_user():

@@ -6,7 +6,7 @@ from datetime import datetime
 from flask import g, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
 from flask_restx import Namespace, Resource, fields
-from sqlalchemy import or_
+from sqlalchemy import or_, func
 
 from app import db
 from app.models.audit_trail import AuditTrail
@@ -15,6 +15,7 @@ from app.models.evidence import Evidence
 from app.models.user import User
 from app.utils.decorators import requireRole
 from app.utils.audit_logger import log_audit
+from app.utils.serializers import to_iso_timestamp, resolve_user_name
 
 logger = logging.getLogger(__name__)
 
@@ -192,8 +193,8 @@ def _enum_to_api(value, *, fallback="UNKNOWN"):
     return str(value)
 
 
-def _serialize_case(case):
-    return {
+def _serialize_case(case, include_evidence_count=False):
+    result = {
         "id": str(case.id),
         "case_number": case.case_number,
         "title": case.title,
@@ -203,10 +204,17 @@ def _serialize_case(case):
         "status": _enum_to_api(case.status, fallback="OPEN"),
         "incident_date": case.incident_date.isoformat() if case.incident_date else None,
         "assigned_to": str(case.assigned_user_id) if case.assigned_user_id else None,
+        "assigned_user_name": resolve_user_name(str(case.assigned_user_id)) if case.assigned_user_id else None,
+        "investigator_name": resolve_user_name(str(case.assigned_user_id)) if case.assigned_user_id else None,
         "opened_by_user_id": str(case.opened_by_user_id) if case.opened_by_user_id else None,
-        "created_at": case.created_at.isoformat() if case.created_at else None,
-        "updated_at": case.updated_at.isoformat() if case.updated_at else None,
+        "created_at": to_iso_timestamp(case.created_at),
+        "updated_at": to_iso_timestamp(case.updated_at),
     }
+    
+    if include_evidence_count:
+        result["evidence_count"] = Evidence.query.filter_by(case_id=case.id).count()
+    
+    return result
 
 
 def _serialize_evidence(item):
@@ -269,7 +277,7 @@ class CaseListResource(Resource):
                 )
 
             pagination = query.order_by(Case.created_at.desc()).paginate(page=page, per_page=per_page, error_out=False)
-            items = [_serialize_case(c) for c in pagination.items]
+            items = [_serialize_case(c, include_evidence_count=True) for c in pagination.items]
 
             data = {
                 "items": items,

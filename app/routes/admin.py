@@ -17,6 +17,7 @@ from app.models.file_hash import FileHash
 from app.models.user import User, UserRole
 from app.utils.decorators import requireRole
 from app.utils.audit_logger import log_audit
+from app.utils.serializers import to_iso_timestamp, serialize_user_response
 
 admin_bp = Blueprint("admin", __name__)
 
@@ -71,14 +72,7 @@ def _user_created_at_iso(user):
 
 
 def _serialize_user(user):
-    return {
-        "id": str(user.id),
-        "full_name": user.full_name,
-        "email": user.email,
-        "role": user.role.value,
-        "is_active": user.is_active,
-        "created_at": _user_created_at_iso(user),
-    }
+    return serialize_user_response(user)
 
 
 def _apply_log_filters(query):
@@ -136,26 +130,34 @@ def _log_with_joins():
 def _serialize_log_row(log, user, evidence, case, file_name):
     return {
         "id": str(log.id),
-        "occurred_at": log.occurred_at.isoformat() if log.occurred_at else None,
+        "timestamp": to_iso_timestamp(log.occurred_at),
+        "occurred_at": to_iso_timestamp(log.occurred_at),
+        "user_id": str(user.id),
+        "user_name": user.full_name,
+        "user_role": user.role.value,
         "user": {
             "id": str(user.id),
             "full_name": user.full_name,
             "role": user.role.value,
             "badge_number": user.employee_number,
         },
+        "evidence_id": str(evidence.id),
         "evidence": {
             "id": str(evidence.id),
             "evidence_ref": evidence.evidence_tag,
             "description": evidence.description,
             "file_name": file_name,
         },
+        "case_number": case.case_number,
         "case": {
             "id": str(case.id),
             "case_number": case.case_number,
             "fraud_type": case.fraud_type.value,
         },
         "action": log.action,
+        "details": log.notes,
         "hash_at_time": log.hash_at_time,
+        "hash_status": "OK" if log.hash_at_time else None,
         "ip_address": str(log.ip_address) if log.ip_address else None,
         "notes": log.notes,
     }
@@ -412,13 +414,14 @@ def export_evidence_access_log_csv():
     writer = csv.writer(output)
     writer.writerow([
         "timestamp", "user_name", "user_role", "badge_number",
-        "action", "evidence_ref", "case_number", "hash_at_time",
+        "action", "evidence_ref", "case_number", "hash_at_time", "hash_status",
         "session_event", "ip_address",
     ])
     session_events = {"LOGIN", "LOGOUT", "SYSTEM_LOGOUT", "LOGIN_FAILED"}
     for log, user, evidence, case, _file_name in rows:
+        timestamp_iso = to_iso_timestamp(log.occurred_at) if log.occurred_at else ""
         writer.writerow([
-            log.occurred_at.isoformat() if log.occurred_at else "",
+            timestamp_iso,
             user.full_name,
             user.role.value,
             user.employee_number,
@@ -426,6 +429,7 @@ def export_evidence_access_log_csv():
             evidence.evidence_tag,
             case.case_number,
             log.hash_at_time or "",
+            "OK" if log.hash_at_time else "",
             "YES" if log.action in session_events else "",
             str(log.ip_address) if log.ip_address else "",
         ])

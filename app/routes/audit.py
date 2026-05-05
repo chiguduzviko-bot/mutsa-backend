@@ -8,6 +8,7 @@ from sqlalchemy import func
 from app import db
 from app.models.audit_log import AuditLog
 from app.utils.decorators import requireRole
+from app.utils.serializers import serialize_audit_log
 
 audit_bp = Blueprint("audit", __name__)
 
@@ -49,19 +50,7 @@ def _apply_filters(query):
 
 
 def _serialize_log(log):
-    return {
-        "id": str(log.id),
-        "user_id": str(log.user_id) if log.user_id else None,
-        "user_name": log.user_name or "UNKNOWN",
-        "user_role": (log.user_role or "UNKNOWN").upper(),
-        "action": log.action,
-        "case_number": log.case_number,
-        "evidence_ref": log.evidence_ref,
-        "details": log.details,
-        "hash_at_time": log.hash_at_time,
-        "hash_status": log.hash_status or ("OK" if log.hash_at_time else None),
-        "timestamp": log.timestamp.isoformat() + "Z" if log.timestamp else None,
-    }
+    return serialize_audit_log(log)
 
 
 @audit_bp.get("/audit/logs")

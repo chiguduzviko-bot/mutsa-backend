@@ -18,6 +18,7 @@ from app.utils.access_logger import log_access
 from app.utils.decorators import requireRole
 from app.utils.hashing import sha256_hash_file
 from app.utils.audit_logger import log_audit
+from app.utils.serializers import to_iso_timestamp, serialize_custody_record
 
 evidence_ns = Namespace("evidence", description="Evidence management operations")
 
@@ -84,45 +85,29 @@ def _serialize_evidence(item):
         "evidence_tag": item.evidence_tag,
         "title": item.title,
         "item_name": item.title,
+        "file_name": latest_hash.file_name if latest_hash else None,
         "description": item.description,
         "evidence_type": item.evidence_type.value,
         "status": item.state.value,
         "state": item.state.value,
         "source": item.source,
-        "collection_date": item.collected_at.isoformat() if item.collected_at else None,
+        "collection_date": to_iso_timestamp(item.collected_at),
+        "collected_at": to_iso_timestamp(item.collected_at),
         "collected_by": str(item.collected_by_user_id),
         "notes": item.notes,
         "storage_location": item.storage_location,
         "sha256_hash": latest_hash.sha256_hash if latest_hash else None,
-        "file_name": latest_hash.file_name if latest_hash else None,
+        "file_hash": latest_hash.sha256_hash if latest_hash else None,
+        "hashed_at": to_iso_timestamp(latest_hash.hashed_at) if latest_hash else None,
+        "hash_status": "OK" if latest_hash and latest_hash.sha256_hash else None,
+        "created_at": to_iso_timestamp(item.created_at),
+        "updated_at": to_iso_timestamp(item.updated_at),
     }
 
 
 def _serialize_chain_entry(item):
-    from_user = User.query.filter_by(id=item.from_user_id).first() if item.from_user_id else None
-    to_user = User.query.filter_by(id=item.to_user_id).first() if item.to_user_id else None
-    recorded_by_user = User.query.filter_by(id=item.recorded_by_user_id).first() if item.recorded_by_user_id else None
-    
-    return {
-        "id": item.id,
-        "from_user_id": str(item.from_user_id) if item.from_user_id else None,
-        "from_user_name": from_user.full_name if from_user else "Unknown",
-        "from_officer": from_user.full_name if from_user else "Unknown",
-        "to_user_id": str(item.to_user_id) if item.to_user_id else None,
-        "to_user_name": to_user.full_name if to_user else "Unknown",
-        "to_officer": to_user.full_name if to_user else "Unknown",
-        "action": item.action.value,
-        "location": item.location,
-        "notes": item.notes,
-        "timestamp": item.transferred_at.isoformat() if item.transferred_at else None,
-        "transferred_at": item.transferred_at.isoformat() if item.transferred_at else None,
-        "transferred_date": item.transferred_at.isoformat() if item.transferred_at else None,
-        "received_at": item.received_at.isoformat() if item.received_at else None,
-        "created_at": item.created_at.isoformat() if item.created_at else None,
-        "recorded_by_user_id": str(item.recorded_by_user_id),
-        "recorded_by_name": recorded_by_user.full_name if recorded_by_user else "Unknown",
-        "recorded_by": recorded_by_user.full_name if recorded_by_user else "Unknown",
-    }
+    """Serialize custody log using consistent shape with serialize_custody_record."""
+    return serialize_custody_record(item, include_ids=True)
 
 
 def _first_non_empty(mapping, *keys):
