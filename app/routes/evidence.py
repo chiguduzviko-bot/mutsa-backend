@@ -99,15 +99,29 @@ def _serialize_evidence(item):
 
 
 def _serialize_chain_entry(item):
+    from_user = User.query.filter_by(id=item.from_user_id).first() if item.from_user_id else None
+    to_user = User.query.filter_by(id=item.to_user_id).first() if item.to_user_id else None
+    recorded_by_user = User.query.filter_by(id=item.recorded_by_user_id).first() if item.recorded_by_user_id else None
+    
     return {
         "id": item.id,
         "from_user_id": str(item.from_user_id) if item.from_user_id else None,
+        "from_user_name": from_user.full_name if from_user else "Unknown",
+        "from_officer": from_user.full_name if from_user else "Unknown",
         "to_user_id": str(item.to_user_id) if item.to_user_id else None,
+        "to_user_name": to_user.full_name if to_user else "Unknown",
+        "to_officer": to_user.full_name if to_user else "Unknown",
         "action": item.action.value,
         "location": item.location,
         "notes": item.notes,
+        "timestamp": item.transferred_at.isoformat() if item.transferred_at else None,
         "transferred_at": item.transferred_at.isoformat() if item.transferred_at else None,
+        "transferred_date": item.transferred_at.isoformat() if item.transferred_at else None,
+        "received_at": item.received_at.isoformat() if item.received_at else None,
+        "created_at": item.created_at.isoformat() if item.created_at else None,
         "recorded_by_user_id": str(item.recorded_by_user_id),
+        "recorded_by_name": recorded_by_user.full_name if recorded_by_user else "Unknown",
+        "recorded_by": recorded_by_user.full_name if recorded_by_user else "Unknown",
     }
 
 
