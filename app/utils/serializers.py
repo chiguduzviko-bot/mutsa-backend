@@ -4,7 +4,6 @@ Handles user denormalization, ISO timestamps, and consistent row shapes.
 """
 from datetime import datetime
 from typing import Optional, Dict, Any, List
-from app.models.user import User
 
 
 def resolve_user_name(user_id: str) -> Optional[str]:
@@ -12,9 +11,11 @@ def resolve_user_name(user_id: str) -> Optional[str]:
     if not user_id:
         return None
     try:
-        user = User.query.filter_by(id=user_id).first()
+        from app.models.user import User
+        user = User.query.filter_by(id=str(user_id)).first()
         return user.full_name if user else None
-    except Exception:
+    except Exception as e:
+        # Silently fail - don't let user lookup errors crash the API
         return None
 
 
@@ -23,9 +24,11 @@ def resolve_user_role(user_id: str) -> Optional[str]:
     if not user_id:
         return None
     try:
-        user = User.query.filter_by(id=user_id).first()
+        from app.models.user import User
+        user = User.query.filter_by(id=str(user_id)).first()
         return user.role.value if user else None
-    except Exception:
+    except Exception as e:
+        # Silently fail - don't let user lookup errors crash the API
         return None
 
 
@@ -53,9 +56,20 @@ def serialize_custody_record(
     Returns:
         Serialized custody record with user names resolved
     """
-    from_name = resolve_user_name(str(custody_log.from_user_id)) if custody_log.from_user_id else None
-    to_name = resolve_user_name(str(custody_log.to_user_id)) if custody_log.to_user_id else None
-    recorded_by_name = resolve_user_name(str(custody_log.recorded_by_user_id)) if custody_log.recorded_by_user_id else None
+    try:
+        from_name = resolve_user_name(str(custody_log.from_user_id)) if custody_log.from_user_id else None
+    except Exception:
+        from_name = None
+    
+    try:
+        to_name = resolve_user_name(str(custody_log.to_user_id)) if custody_log.to_user_id else None
+    except Exception:
+        to_name = None
+    
+    try:
+        recorded_by_name = resolve_user_name(str(custody_log.recorded_by_user_id)) if custody_log.recorded_by_user_id else None
+    except Exception:
+        recorded_by_name = None
 
     record = {
         "timestamp": to_iso_timestamp(custody_log.transferred_at),
