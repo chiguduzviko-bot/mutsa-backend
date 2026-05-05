@@ -304,7 +304,7 @@ class EvidenceStatusResource(Resource):
 
 @custody_ns.route("/custody-log/<string:evidence_id>")
 class CustodyLogResource(Resource):
-    @requireRole("INVESTIGATOR", "AUTHORIZER", "AUDITOR")
+    @requireRole("INVESTIGATOR", "AUTHORIZER", "AUDITOR", "ADMIN")
     @jwt_required()
     def get(self, evidence_id):
         evidence, err = _load_evidence_or_error(evidence_id)
