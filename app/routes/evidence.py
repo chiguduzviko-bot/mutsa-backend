@@ -2,8 +2,8 @@ import os
 import uuid
 from datetime import datetime
 
-from flask import request, send_file
-from flask_jwt_extended import get_jwt_identity, jwt_required
+from flask import request, send_file, g
+from flask_jwt_extended import get_jwt_identity, jwt_required, get_jwt
 from flask_restx import Namespace, Resource, fields
 from werkzeug.utils import secure_filename
 
@@ -201,7 +201,6 @@ class EvidenceListAllResource(Resource):
             actor_role = str(getattr(actor.role, "value", actor.role)).strip().upper()
         else:
             # Fallback to JWT claim if user not in g
-            from flask_jwt_extended import get_jwt
             jwt_payload = get_jwt() or {}
             actor_role = str(jwt_payload.get("role", "")).strip().upper()
         

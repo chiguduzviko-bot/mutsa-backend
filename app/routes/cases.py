@@ -255,8 +255,26 @@ class CaseListResource(Resource):
                 Case.fraud_type.isnot(None),
             )
             actor = getattr(g, "current_user", None)
+            actor_id = None
+            if actor:
+                actor_id = actor.id
+            else:
+                # Fallback to JWT identity if user not in g
+                from flask_jwt_extended import get_jwt_identity
+                actor_id = _to_uuid(get_jwt_identity())
+            
             actor_role = str(getattr(actor.role, "value", actor.role)).strip().upper() if actor else ""
-            if actor_role == "AUTHORIZER" and not status:
+            
+            # If INVESTIGATOR with no explicit filters, show their own cases
+            if actor_role == "INVESTIGATOR" and not status and not assigned_to and not created_by:
+                query = query.filter(
+                    or_(
+                        Case.opened_by_user_id == actor_id,
+                        Case.assigned_user_id == actor_id,
+                    )
+                )
+            # If AUTHORIZER with no status filter, show pending approval
+            elif actor_role == "AUTHORIZER" and not status:
                 status = CaseStatus.PENDING_APPROVAL.value
 
             if status:
