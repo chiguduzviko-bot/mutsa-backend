@@ -6,6 +6,7 @@ from datetime import datetime
 from flask import g, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
 from flask_restx import Namespace, Resource, fields
+from sqlalchemy import or_
 
 from app import db
 from app.models.audit_trail import AuditTrail
@@ -232,6 +233,7 @@ class CaseListResource(Resource):
             per_page = request.args.get("per_page", default=10, type=int)
             status = request.args.get("status")
             fraud_type = request.args.get("fraud_type")
+            assigned_to = request.args.get("assigned_to")
 
             if page < 1 or per_page < 1 or per_page > 100:
                 return _response(False, message="Invalid pagination parameters", status=400)
@@ -255,6 +257,16 @@ class CaseListResource(Resource):
                     query = query.filter(Case.fraud_type == _parse_fraud_type(fraud_type))
                 except ValueError:
                     return _response(False, message="Invalid fraud_type filter", status=400)
+            if assigned_to:
+                assigned_uuid = _to_uuid(assigned_to)
+                if not assigned_uuid:
+                    return _response(False, message="Invalid assigned_to filter", status=400)
+                query = query.filter(
+                    or_(
+                        Case.opened_by_user_id == assigned_uuid,
+                        Case.assigned_user_id == assigned_uuid,
+                    )
+                )
 
             pagination = query.order_by(Case.created_at.desc()).paginate(page=page, per_page=per_page, error_out=False)
             items = [_serialize_case(c) for c in pagination.items]
