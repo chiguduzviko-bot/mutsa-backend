@@ -206,6 +206,9 @@ def _serialize_case(case, include_evidence_count=False):
         "assigned_to": str(case.assigned_user_id) if case.assigned_user_id else None,
         "assigned_user_name": resolve_user_name(str(case.assigned_user_id)) if case.assigned_user_id else None,
         "investigator_name": resolve_user_name(str(case.assigned_user_id)) if case.assigned_user_id else None,
+        "created_by_id": str(case.opened_by_user_id) if case.opened_by_user_id else None,
+        "created_by_name": resolve_user_name(str(case.opened_by_user_id)) if case.opened_by_user_id else None,
+        "creator_name": resolve_user_name(str(case.opened_by_user_id)) if case.opened_by_user_id else None,
         "opened_by_user_id": str(case.opened_by_user_id) if case.opened_by_user_id else None,
         "created_at": to_iso_timestamp(case.created_at),
         "updated_at": to_iso_timestamp(case.updated_at),
@@ -242,6 +245,7 @@ class CaseListResource(Resource):
             status = request.args.get("status")
             fraud_type = request.args.get("fraud_type")
             assigned_to = request.args.get("assigned_to")
+            created_by = request.args.get("created_by")
 
             if page < 1 or per_page < 1 or per_page > 100:
                 return _response(False, message="Invalid pagination parameters", status=400)
@@ -275,6 +279,11 @@ class CaseListResource(Resource):
                         Case.assigned_user_id == assigned_uuid,
                     )
                 )
+            if created_by:
+                created_by_uuid = _to_uuid(created_by)
+                if not created_by_uuid:
+                    return _response(False, message="Invalid created_by filter", status=400)
+                query = query.filter(Case.opened_by_user_id == created_by_uuid)
 
             pagination = query.order_by(Case.created_at.desc()).paginate(page=page, per_page=per_page, error_out=False)
             items = [_serialize_case(c, include_evidence_count=True) for c in pagination.items]
@@ -337,6 +346,10 @@ class CaseListResource(Resource):
         assigned_to_uuid = _to_uuid(data.get("assigned_to")) if data.get("assigned_to") else None
         if assigned_to_uuid and not User.query.filter_by(id=assigned_to_uuid).first():
             return _response(False, message="Assigned user not found", status=404)
+        
+        # Default assigned_to = creator if not specified
+        if not assigned_to_uuid:
+            assigned_to_uuid = actor_id
 
         case_number = _generate_case_number()
         case = Case(

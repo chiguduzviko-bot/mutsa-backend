@@ -41,7 +41,8 @@ def requireRole(*allowed_roles):
             claimed_role = str(jwt_payload.get("role", "")).strip().upper()
             resolved_role = _normalize_user_role(user) if user else claimed_role
 
-            if not user or resolved_role not in normalized_allowed:
+            # Allow access if user is found with valid role, OR if JWT claim matches allowed role
+            if resolved_role not in normalized_allowed:
                 return {"success": False, "data": {}, "message": "Forbidden"}, 403
 
             g.current_user = user

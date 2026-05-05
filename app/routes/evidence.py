@@ -81,6 +81,7 @@ def _serialize_evidence(item):
     )
     return {
         "id": str(item.id),
+        "evidence_id": str(item.id),  # Backward compat alias for id
         "case_id": str(item.case_id),
         "evidence_tag": item.evidence_tag,
         "title": item.title,
@@ -170,6 +171,80 @@ def _parse_or_infer_evidence_type(raw_value, file_name, mime_type):
         return EvidenceType.DIGITAL_FILE
 
     return EvidenceType.DIGITAL_FILE
+
+
+@evidence_ns.route("/")
+class EvidenceListAllResource(Resource):
+    @requireRole("INVESTIGATOR", "AUDITOR", "AUTHORIZER", "ADMIN")
+    @jwt_required()
+    def get(self):
+        """Get all evidence (with optional pagination and filtering).
+        
+        RBAC Rules:
+        - INVESTIGATOR: Only evidence they collected or currently custodian of
+        - AUDITOR/ADMIN: All evidence
+        - AUTHORIZER: All evidence
+        """
+        from app.models.user import UserRole
+        
+        page = request.args.get("page", default=1, type=int)
+        per_page = request.args.get("per_page", default=20, type=int)
+        case_id_filter = request.args.get("case_id")
+        status_filter = request.args.get("status")
+        
+        # Get current user role from g (set by requireRole decorator or JWT)
+        actor = getattr(g, "current_user", None)
+        actor_id = _to_uuid(get_jwt_identity()) if not actor else actor.id
+        
+        # Determine user role for RBAC
+        if actor:
+            actor_role = str(getattr(actor.role, "value", actor.role)).strip().upper()
+        else:
+            # Fallback to JWT claim if user not in g
+            from flask_jwt_extended import get_jwt
+            jwt_payload = get_jwt() or {}
+            actor_role = str(jwt_payload.get("role", "")).strip().upper()
+        
+        query = Evidence.query
+        
+        # Apply RBAC: Investigators see only their evidence
+        if actor_role == "INVESTIGATOR" and actor_id:
+            query = query.filter(
+                (Evidence.collected_by_user_id == actor_id) | 
+                (Evidence.current_custodian_id == actor_id)
+            )
+        # AUDITOR, ADMIN, AUTHORIZER see all evidence
+        
+        # Optional filtering by case_id
+        if case_id_filter:
+            case_uuid = _to_uuid(case_id_filter)
+            if case_uuid:
+                query = query.filter_by(case_id=case_uuid)
+        
+        # Optional filtering by status
+        if status_filter:
+            query = query.filter_by(state=status_filter)
+        
+        # Order by creation date, most recent first
+        query = query.order_by(Evidence.created_at.desc())
+        
+        # Paginate
+        paginated = query.paginate(page=page, per_page=per_page, error_out=False)
+        
+        items = [_serialize_evidence(item) for item in paginated.items]
+        
+        return _response(
+            True,
+            data={
+                "evidence": items,
+                "items": items,  # Backward compat
+                "total": paginated.total,
+                "page": page,
+                "per_page": per_page,
+                "pages": paginated.pages,
+            },
+            message="All evidence fetched",
+        )
 
 
 @evidence_ns.route("/cases/<string:case_id>/evidence")
