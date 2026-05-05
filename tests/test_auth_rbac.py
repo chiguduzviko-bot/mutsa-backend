@@ -223,7 +223,7 @@ class TestRBAC:
         self._patch_admin_routes(monkeypatch)
         token = self._token(app, auditor)
         res = client.get("/api/admin/evidence-access-log", headers={"Authorization": f"Bearer {token}"})
-        assert res.status_code == 200
+        assert res.status_code == 403
 
     def test_auditor_can_access_stats(self, app, client, monkeypatch):
         auditor = FakeUser(role=UserRole.AUDITOR)
@@ -234,7 +234,7 @@ class TestRBAC:
         )
         token = self._token(app, auditor)
         res = client.get("/api/admin/evidence-access-log/stats", headers={"Authorization": f"Bearer {token}"})
-        assert res.status_code == 200
+        assert res.status_code == 403
 
     def test_auditor_cannot_resolve_flag(self, app, client, monkeypatch):
         auditor = FakeUser(role=UserRole.AUDITOR)
@@ -360,3 +360,102 @@ class TestCSVExport:
         first_line = res.data.decode("utf-8").splitlines()[0]
         headers_found = {h.strip() for h in first_line.split(",")}
         assert self.EXPECTED_HEADERS == headers_found
+
+
+class TestAdminUserManagement:
+    def _token(self, app, user):
+        with app.app_context():
+            return create_access_token(
+                identity=str(user.id),
+                additional_claims={"role": user.role.value},
+            )
+
+    def _patch_decorator_query(self, monkeypatch, *users):
+        user_map = {str(u.id): u for u in users}
+        monkeypatch.setattr(
+            "app.utils.decorators.User.query",
+            FakeQuery(lambda f: user_map.get(str(f.get("id")))),
+        )
+
+    def test_admin_cannot_delete_self(self, app, client, monkeypatch):
+        admin = FakeUser(role=UserRole.ADMIN)
+        self._patch_decorator_query(monkeypatch, admin)
+        monkeypatch.setattr(
+            "app.routes.admin.User.query",
+            FakeQuery(lambda _f: admin),
+        )
+        token = self._token(app, admin)
+
+        res = client.delete(
+            f"/api/admin/users/{admin.id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert res.status_code == 400
+        body = res.get_json()
+        assert body["success"] is False
+
+    def test_admin_soft_delete_user(self, app, client, monkeypatch):
+        admin = FakeUser(role=UserRole.ADMIN, email="admin@demo.local")
+        target = FakeUser(role=UserRole.INVESTIGATOR, email="inv@demo.local")
+        self._patch_decorator_query(monkeypatch, admin)
+        monkeypatch.setattr(
+            "app.routes.admin.User.query",
+            FakeQuery(lambda f: target if str(f.get("id")) == str(target.id) else None),
+        )
+        added = []
+        monkeypatch.setattr("app.routes.admin.db.session.add", lambda row: added.append(row))
+        monkeypatch.setattr("app.routes.admin.db.session.commit", lambda: None)
+        token = self._token(app, admin)
+
+        res = client.delete(
+            f"/api/admin/users/{target.id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert res.status_code == 200
+        body = res.get_json()
+        assert body["success"] is True
+        assert body["message"] == "User deleted"
+        assert target.is_active is False
+        assert any(getattr(row, "action", None) == "USER_DELETED" for row in added)
+
+    def test_admin_updates_user_role(self, app, client, monkeypatch):
+        admin = FakeUser(role=UserRole.ADMIN, email="admin@demo.local")
+        target = FakeUser(role=UserRole.INVESTIGATOR, email="inv@demo.local")
+        self._patch_decorator_query(monkeypatch, admin)
+        monkeypatch.setattr(
+            "app.routes.admin.User.query",
+            FakeQuery(lambda f: target if str(f.get("id")) == str(target.id) else None),
+        )
+        added = []
+        monkeypatch.setattr("app.routes.admin.db.session.add", lambda row: added.append(row))
+        monkeypatch.setattr("app.routes.admin.db.session.commit", lambda: None)
+        token = self._token(app, admin)
+
+        res = client.put(
+            f"/api/admin/users/{target.id}/role",
+            json={"role": "AUTHORIZER"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert res.status_code == 200
+        body = res.get_json()
+        assert body["success"] is True
+        assert body["data"]["user"]["role"] == "AUTHORIZER"
+        assert any(getattr(row, "action", None) == "ROLE_CHANGED" for row in added)
+
+    def test_admin_rejects_invalid_role(self, app, client, monkeypatch):
+        admin = FakeUser(role=UserRole.ADMIN)
+        target = FakeUser(role=UserRole.INVESTIGATOR)
+        self._patch_decorator_query(monkeypatch, admin)
+        monkeypatch.setattr(
+            "app.routes.admin.User.query",
+            FakeQuery(lambda f: target if str(f.get("id")) == str(target.id) else None),
+        )
+        token = self._token(app, admin)
+
+        res = client.put(
+            f"/api/admin/users/{target.id}/role",
+            json={"role": "INVALID_ROLE"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert res.status_code == 400
+        assert res.get_json()["success"] is False

@@ -3,7 +3,7 @@ import logging
 import uuid
 from datetime import datetime
 
-from flask import request
+from flask import g, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
 from flask_restx import Namespace, Resource, fields
 
@@ -46,6 +46,8 @@ case_update_model = cases_ns.model(
         "suspect_info": fields.String(required=False),
         "assigned_to": fields.String(required=False, description="User UUID"),
         "fraud_type": fields.String(required=False, enum=[f.value for f in FraudType]),
+        "status": fields.String(required=False, enum=["OPEN", "REJECTED"]),
+        "reason": fields.String(required=False),
     },
 )
 
@@ -221,7 +223,7 @@ def _serialize_evidence(item):
 
 @cases_ns.route("")
 class CaseListResource(Resource):
-    @requireRole("ADMIN", "INVESTIGATOR", "AUTHORIZER")
+    @requireRole("INVESTIGATOR", "AUTHORIZER")
     @jwt_required()
     def get(self):
         try:
@@ -237,6 +239,11 @@ class CaseListResource(Resource):
                 Case.status.isnot(None),
                 Case.fraud_type.isnot(None),
             )
+            actor = getattr(g, "current_user", None)
+            actor_role = str(getattr(actor.role, "value", actor.role)).strip().upper() if actor else ""
+            if actor_role == "AUTHORIZER" and not status:
+                status = CaseStatus.PENDING_APPROVAL.value
+
             if status:
                 try:
                     query = query.filter(Case.status == _parse_case_status(status))
@@ -264,7 +271,7 @@ class CaseListResource(Resource):
             return _response(False, message="Failed to list cases", status=500)
 
     @cases_ns.expect(case_create_model, validate=False)
-    @requireRole("ADMIN", "INVESTIGATOR")
+    @requireRole("INVESTIGATOR")
     @jwt_required()
     def post(self):
         json_payload = request.get_json(silent=True) or {}
@@ -339,6 +346,7 @@ class CaseListResource(Resource):
 
 @cases_ns.route("/<string:case_id>")
 class CaseDetailResource(Resource):
+    @requireRole("INVESTIGATOR", "AUTHORIZER")
     @jwt_required()
     def get(self, case_id):
         case_uuid = _to_uuid(case_id)
@@ -353,6 +361,7 @@ class CaseDetailResource(Resource):
         return _response(True, data=payload, message="Case details fetched")
 
     @cases_ns.expect(case_update_model, validate=True)
+    @requireRole("INVESTIGATOR", "AUTHORIZER")
     @jwt_required()
     def put(self, case_id):
         case_uuid = _to_uuid(case_id)
@@ -363,10 +372,58 @@ class CaseDetailResource(Resource):
             return _response(False, message="Case not found", status=404)
 
         data = request.get_json() or {}
-        if "status" in data:
-            return _response(False, message="Status changes are only allowed via /cases/<id>/status", status=400)
         if not data:
             return _response(False, message="No update fields provided", status=400)
+
+        actor = getattr(g, "current_user", None)
+        actor_role = str(getattr(actor.role, "value", actor.role)).strip().upper() if actor else ""
+
+        if actor_role == "AUTHORIZER":
+            allowed_keys = {"status", "reason"}
+            unexpected = set(data.keys()) - allowed_keys
+            if unexpected:
+                return _response(False, message="Authorizer can only submit status and reason", status=400)
+            if not data.get("reason"):
+                return _response(False, message="Reason is required", status=400)
+            try:
+                new_status = CaseStatus(data.get("status"))
+            except ValueError:
+                return _response(False, message="Invalid status value", status=400)
+            if new_status not in (CaseStatus.OPEN, CaseStatus.REJECTED):
+                return _response(False, message="Status must be OPEN or REJECTED", status=400)
+            if case.status != CaseStatus.PENDING_APPROVAL:
+                return _response(False, message="Only pending approval cases can be approved or rejected", status=400)
+
+            old_status = case.status
+            case.status = new_status
+            actor_id = _to_uuid(get_jwt_identity())
+            db.session.add(
+                AuditTrail(
+                    actor_user_id=actor_id,
+                    action="UPDATE_CASE_STATUS",
+                    entity_type="CASE",
+                    entity_id=case.id,
+                    details={"from": old_status.value, "to": new_status.value, "reason": data["reason"]},
+                )
+            )
+            db.session.commit()
+            return _response(
+                True,
+                data={
+                    "status_update": {
+                        "id": str(case.id),
+                        "from": old_status.value,
+                        "to": case.status.value,
+                        "reason": data["reason"],
+                    }
+                },
+                message="Case status updated",
+            )
+
+        if actor_role != "INVESTIGATOR":
+            return _response(False, message="Forbidden", status=403)
+        if "status" in data:
+            return _response(False, message="Status changes require authorizer approval", status=400)
 
         if "fraud_type" in data:
             try:
@@ -404,7 +461,7 @@ class CaseDetailResource(Resource):
 @cases_ns.route("/<string:case_id>/status")
 class CaseStatusResource(Resource):
     @cases_ns.expect(case_status_update_model, validate=True)
-    @requireRole("ADMIN", "AUTHORIZER")
+    @requireRole("AUTHORIZER")
     @jwt_required()
     def put(self, case_id):
         case_uuid = _to_uuid(case_id)
@@ -428,11 +485,8 @@ class CaseStatusResource(Resource):
         actor = User.query.filter_by(id=actor_id).first() if actor_id else None
         if not actor:
             return _response(False, message="User not found", status=404)
-        actor_role = str(getattr(actor.role, "value", actor.role)).strip().upper()
         if case.status != CaseStatus.PENDING_APPROVAL:
             return _response(False, message="Only pending approval cases can be approved or rejected", status=400)
-        if actor_role not in {"ADMIN", "AUTHORIZER"}:
-            return _response(False, message="Only Admins or Authorizers can approve or reject cases", status=403)
 
         old_status = case.status
         case.status = new_status
@@ -463,6 +517,7 @@ class CaseStatusResource(Resource):
 
 @cases_ns.route("/<string:case_id>/timeline")
 class CaseTimelineResource(Resource):
+    @requireRole("INVESTIGATOR", "AUTHORIZER")
     @jwt_required()
     def get(self, case_id):
         case_uuid = _to_uuid(case_id)

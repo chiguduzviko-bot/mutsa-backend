@@ -172,7 +172,7 @@ def _parse_or_infer_evidence_type(raw_value, file_name, mime_type):
 @evidence_ns.route("/cases/<string:case_id>/evidence")
 class CaseEvidenceCollectionResource(Resource):
     @evidence_ns.expect(evidence_create_model, validate=False)
-    @requireRole("ADMIN", "INVESTIGATOR")
+    @requireRole("INVESTIGATOR")
     @jwt_required()
     def post(self, case_id):
         case, err = _ensure_case(case_id)
@@ -284,7 +284,7 @@ class CaseEvidenceCollectionResource(Resource):
             status=201,
         )
 
-    @requireRole("ADMIN", "INVESTIGATOR")
+    @requireRole("INVESTIGATOR")
     @jwt_required()
     def get(self, case_id):
         case, err = _ensure_case(case_id)
@@ -301,7 +301,7 @@ class CaseEvidenceCollectionResource(Resource):
 
 @evidence_ns.route("/cases/<string:case_id>/evidences")
 class CaseEvidencesAliasResource(Resource):
-    @requireRole("ADMIN", "INVESTIGATOR")
+    @requireRole("INVESTIGATOR")
     @jwt_required()
     def get(self, case_id):
         case, err = _ensure_case(case_id)
@@ -318,6 +318,7 @@ class CaseEvidencesAliasResource(Resource):
 
 @evidence_ns.route("/evidence/<string:evidence_id>")
 class EvidenceDetailResource(Resource):
+    @requireRole("INVESTIGATOR")
     @jwt_required()
     def get(self, evidence_id):
         evidence, err = _ensure_evidence(evidence_id)
@@ -343,6 +344,7 @@ class EvidenceDetailResource(Resource):
 
 @evidence_ns.route("/evidence/<string:evidence_id>/verify-hash")
 class EvidenceVerifyHashResource(Resource):
+    @requireRole("INVESTIGATOR", "AUDITOR")
     @jwt_required()
     def get(self, evidence_id):
         evidence, err = _ensure_evidence(evidence_id)
@@ -371,6 +373,7 @@ class EvidenceVerifyHashResource(Resource):
             message="Current hash fetched",
         )
 
+    @requireRole("INVESTIGATOR", "AUDITOR")
     @jwt_required()
     def post(self, evidence_id):
         evidence, err = _ensure_evidence(evidence_id)
@@ -430,6 +433,7 @@ class EvidenceVerifyHashResource(Resource):
 
 @evidence_ns.route("/evidence/<string:evidence_id>/download")
 class EvidenceDownloadResource(Resource):
+    @requireRole("INVESTIGATOR")
     @jwt_required()
     def get(self, evidence_id):
         evidence, err = _ensure_evidence(evidence_id)
@@ -459,6 +463,7 @@ class EvidenceDownloadResource(Resource):
 
 @evidence_ns.route("/evidence/<string:evidence_id>/chain")
 class EvidenceChainResource(Resource):
+    @requireRole("INVESTIGATOR", "AUTHORIZER", "AUDITOR")
     @jwt_required()
     def get(self, evidence_id):
         evidence, err = _ensure_evidence(evidence_id)

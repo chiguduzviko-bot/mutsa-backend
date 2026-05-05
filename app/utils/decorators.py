@@ -42,7 +42,7 @@ def requireRole(*allowed_roles):
             resolved_role = _normalize_user_role(user) if user else claimed_role
 
             if not user or resolved_role not in normalized_allowed:
-                return {"success": False, "message": "Forbidden"}, 403
+                return {"success": False, "data": {}, "message": "Forbidden"}, 403
 
             g.current_user = user
             return fn(*args, **kwargs)
@@ -54,4 +54,8 @@ def requireRole(*allowed_roles):
 
 # Backward-compatible alias
 def role_required(*allowed_roles):
+    return requireRole(*allowed_roles)
+
+
+def roles_required(*allowed_roles):
     return requireRole(*allowed_roles)

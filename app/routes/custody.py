@@ -12,6 +12,7 @@ from app.models.custody_log import CustodyAction, CustodyLog
 from app.models.evidence import Evidence, EvidenceState
 from app.models.user import User
 from app.utils.access_logger import log_access
+from app.utils.decorators import requireRole
 
 custody_ns = Namespace("custody", description="Custody transfer operations")
 logger = logging.getLogger(__name__)
@@ -131,6 +132,7 @@ def _append_custody_log(*, evidence_id, from_user_id, to_user_id, action, locati
 @custody_ns.route("/evidence/<string:evidence_id>/transfer")
 class EvidenceTransferResource(Resource):
     @custody_ns.expect(transfer_model, validate=True)
+    @requireRole("INVESTIGATOR")
     @jwt_required()
     def post(self, evidence_id):
         evidence, err = _load_evidence_or_error(evidence_id)
@@ -217,6 +219,7 @@ class EvidenceTransferResource(Resource):
 @custody_ns.route("/evidence/<string:evidence_id>/status")
 class EvidenceStatusResource(Resource):
     @custody_ns.expect(status_model, validate=True)
+    @requireRole("INVESTIGATOR")
     @jwt_required()
     def put(self, evidence_id):
         evidence, err = _load_evidence_or_error(evidence_id)
@@ -290,6 +293,7 @@ class EvidenceStatusResource(Resource):
 
 @custody_ns.route("/custody-log/<string:evidence_id>")
 class CustodyLogResource(Resource):
+    @requireRole("INVESTIGATOR", "AUTHORIZER", "AUDITOR")
     @jwt_required()
     def get(self, evidence_id):
         evidence, err = _load_evidence_or_error(evidence_id)

@@ -2,10 +2,7 @@ import csv
 import io
 import uuid
 from datetime import datetime, time
-from functools import wraps
-
 from flask import Blueprint, Response, jsonify, request
-from flask_jwt_extended import get_jwt_identity, jwt_required
 from sqlalchemy import func
 
 from app import db
@@ -13,6 +10,7 @@ from app.models.case import Case
 from app.models.evidence import Evidence
 from app.models.evidence_access_log import EvidenceAccessLog
 from app.models.user import User
+from app.utils.decorators import requireRole
 
 audit_bp = Blueprint("audit", __name__)
 
@@ -34,21 +32,6 @@ def _parse_date(value):
             return datetime.combine(datetime.strptime(value, "%Y-%m-%d").date(), time.min)
         except ValueError:
             return None
-
-
-def require_auditor(fn):
-    @wraps(fn)
-    @jwt_required()
-    def wrapper(*args, **kwargs):
-        user_id = _to_uuid(get_jwt_identity())
-        user = User.query.filter_by(id=user_id, is_active=True).first() if user_id else None
-        role = str(getattr(user.role, "value", user.role)).strip().upper() if user else ""
-        if not user or role not in ("ADMIN", "AUDITOR"):
-            return jsonify(success=False, message="Auditor access required"), 403
-        return fn(*args, **kwargs)
-
-    return wrapper
-
 
 def _base_query():
     return (
@@ -96,7 +79,7 @@ def _serialize_log(log, user, evidence, case):
 
 
 @audit_bp.get("/audit/logs")
-@require_auditor
+@requireRole("AUDITOR")
 def get_audit_logs():
     page = max(int(request.args.get("page", 1) or 1), 1)
     per_page = min(max(int(request.args.get("per_page", 50) or 50), 1), 200)
@@ -118,11 +101,12 @@ def get_audit_logs():
             "page": page,
             "per_page": per_page,
         },
+        message="Audit logs fetched",
     )
 
 
 @audit_bp.get("/audit/stats")
-@require_auditor
+@requireRole("AUDITOR")
 def get_audit_stats():
     today = datetime.utcnow().date()
     start_today = datetime.combine(today, time.min)
@@ -140,11 +124,13 @@ def get_audit_stats():
             "evidence_items_touched": base.with_entities(func.count(func.distinct(EvidenceAccessLog.evidence_id))).scalar() or 0,
             "hash_verifications": base.filter(EvidenceAccessLog.action == "HASH_VERIFIED").count(),
         },
+        message="Audit stats fetched",
     )
 
 
 @audit_bp.get("/audit/logs/export")
-@require_auditor
+@audit_bp.get("/audit/export")
+@requireRole("AUDITOR")
 def export_audit_logs():
     rows = _apply_filters(_base_query()).order_by(EvidenceAccessLog.occurred_at.desc()).all()
 

@@ -18,8 +18,8 @@ from app.utils.decorators import requireRole
 
 admin_bp = Blueprint("admin", __name__)
 
-_AUDITOR_OR_ADMIN = ("ADMIN", "AUDITOR")
 _ADMIN_ONLY = ("ADMIN",)
+_AUDITOR_OR_ADMIN = ("ADMIN", "AUDITOR")
 
 _ADMIN_USER_CREATE_ROLES = frozenset(r.value for r in UserRole)
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -68,8 +68,15 @@ def _user_created_at_iso(user):
     return user.created_at.isoformat() + "Z"
 
 
-def _is_admin(user):
-    return bool(user) and str(getattr(user.role, "value", user.role)).strip().upper() == "ADMIN"
+def _serialize_user(user):
+    return {
+        "id": str(user.id),
+        "full_name": user.full_name,
+        "email": user.email,
+        "role": user.role.value,
+        "is_active": user.is_active,
+        "created_at": _user_created_at_iso(user),
+    }
 
 
 def _apply_log_filters(query):
@@ -175,7 +182,7 @@ def admin_create_user():
         return _err("Password must be at least 8 characters", 400)
 
     if User.query.filter_by(email=email).first():
-        return jsonify({"success": False, "message": "Email already registered"}), 409
+        return _err("Email already registered", 409)
 
     try:
         role = User.normalize_role_value(role_raw)
@@ -214,15 +221,97 @@ def admin_create_user():
     )
 
 
+@admin_bp.get("/admin/users")
+@requireRole(*_ADMIN_ONLY)
+def admin_list_users():
+    users = User.query.order_by(User.created_at.desc()).all()
+    serialized = [_serialize_user(user) for user in users]
+    return _ok(
+        {"users": serialized, "total": len(serialized)},
+        message="Users fetched",
+    )
+
+
+@admin_bp.delete("/admin/users/<string:user_id>")
+@requireRole(*_ADMIN_ONLY)
+def admin_delete_user(user_id):
+    target_id = _to_uuid(user_id)
+    if not target_id:
+        return _err("User not found", 404)
+
+    actor = getattr(g, "current_user", None)
+    if actor and actor.id == target_id:
+        return _err("You cannot delete your own account", 400)
+
+    user = User.query.filter_by(id=target_id).first()
+    if not user:
+        return _err("User not found", 404)
+
+    user.is_active = False
+    db.session.add(
+        AuditTrail(
+            actor_user_id=actor.id if actor else None,
+            actor_role="ADMIN",
+            action="USER_DELETED",
+            entity_type="USER",
+            entity_id=user.id,
+            details={
+                "target_user": str(user.id),
+                "description": f"User {user.email} marked inactive",
+            },
+        )
+    )
+    db.session.commit()
+    return _ok(message="User deleted")
+
+
+@admin_bp.put("/admin/users/<string:user_id>/role")
+@requireRole(*_ADMIN_ONLY)
+def admin_update_user_role(user_id):
+    target_id = _to_uuid(user_id)
+    if not target_id:
+        return _err("User not found", 404)
+
+    user = User.query.filter_by(id=target_id).first()
+    if not user:
+        return _err("User not found", 404)
+
+    body = request.get_json(silent=True) or {}
+    role_raw = (body.get("role") or "").strip().upper()
+    if role_raw not in _ADMIN_USER_CREATE_ROLES:
+        return _err(f"role must be one of: {', '.join(sorted(_ADMIN_USER_CREATE_ROLES))}", 400)
+
+    previous_role = user.role.value
+    user.role = User.normalize_role_value(role_raw)
+    actor = getattr(g, "current_user", None)
+    db.session.add(
+        AuditTrail(
+            actor_user_id=actor.id if actor else None,
+            actor_role="ADMIN",
+            action="ROLE_CHANGED",
+            entity_type="USER",
+            entity_id=user.id,
+            details={
+                "target_user": str(user.id),
+                "from_role": previous_role,
+                "to_role": user.role.value,
+                "description": f"Role changed from {previous_role} to {user.role.value}",
+            },
+        )
+    )
+    db.session.commit()
+
+    return _ok(
+        {"user": {"id": str(user.id), "full_name": user.full_name, "email": user.email, "role": user.role.value}},
+        message="User role updated",
+    )
+
+
 # ─── Evidence access log – list ───────────────────────────────────────────────
 
 @admin_bp.get("/admin/evidence-access-log")
 @requireRole(*_ADMIN_ONLY)
 def list_evidence_access_logs():
-    user = getattr(g, "current_user", None)
-    if not _is_admin(user):
-        return jsonify(success=False, message="Admin access required"), 403
-
     page = max(int(request.args.get("page", 1) or 1), 1)
     per_page = min(max(int(request.args.get("per_page", 50) or 50), 1), 200)
 
@@ -237,6 +326,7 @@ def list_evidence_access_logs():
 
     return _ok(
         {
+            "logs": [_serialize_log_row(*r) for r in rows],
             "items": [_serialize_log_row(*r) for r in rows],
             "page": page,
             "per_page": per_page,
@@ -250,7 +340,7 @@ def list_evidence_access_logs():
 # ─── Evidence access log – stats ──────────────────────────────────────────────
 
 @admin_bp.get("/admin/evidence-access-log/stats")
-@requireRole(*_AUDITOR_OR_ADMIN)
+@requireRole(*_ADMIN_ONLY)
 def evidence_access_log_stats():
     today = datetime.utcnow().date()
     start_today = datetime.combine(today, time.min)
@@ -307,7 +397,7 @@ def evidence_access_log_stats():
 # ─── Evidence access log – CSV export ─────────────────────────────────────────
 
 @admin_bp.get("/admin/evidence-access-log/export")
-@requireRole(*_AUDITOR_OR_ADMIN)
+@requireRole(*_ADMIN_ONLY)
 def export_evidence_access_log_csv():
     rows = _apply_log_filters(_log_with_joins()).order_by(EvidenceAccessLog.occurred_at.desc()).all()
 
